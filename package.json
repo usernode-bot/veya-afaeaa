@@ -2,7 +2,7 @@
   "name": "veya-afaeaa",
   "version": "1.0.0",
   "private": true,
-  "description": "Veya",
+  "description": "Veya - Wallet-first onchain social + DeFi + futures trading platform",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,6 +10,10 @@
   "dependencies": {
     "express": "^4.21.0",
     "pg": "^8.13.0",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "helmet": "^8.0.0",
+    "cors": "^2.8.5",
+    "express-rate-limit": "^7.0.0",
+    "express-validator": "^7.2.0"
   }
 }

@@ -1,3 +1,32 @@
 {
-  "secrets": []
+  "name": "Veya",
+  "secrets": [
+    {
+      "key": "BASE_VERIFY_API_KEY",
+      "description": "Base Verify API key for Social tier verification (apply at verify.base.dev)",
+      "required": false,
+      "private": true,
+      "staging_default": ""
+    },
+    {
+      "key": "ZKPASSPORT_DOMAIN",
+      "description": "Registered domain for zkPassport SDK (register at zkpassport.id, e.g. veya.app)",
+      "required": false,
+      "private": false,
+      "staging_default": "staging.veya.app"
+    }
+  ],
+  "visibility": { "build": "public", "view": "private" },
+  "tests": [
+    { "name": "Home loads", "path": "/home", "expectSelector": ".wallet-card" },
+    { "name": "Trade loads", "path": "/trade", "expectSelector": ".swap-panel" },
+    { "name": "Futures markets load", "path": "/futures", "expectSelector": ".futures-market-row" },
+    { "name": "Futures trading view loads", "path": "/futures/BTC-PERP", "expectSelector": ".futures-chart" },
+    { "name": "Futures portfolio loads", "path": "/futures-portfolio", "expectSelector": ".futures-portfolio" },
+    { "name": "Earn loads", "path": "/earn", "expectSelector": ".earn-section" },
+    { "name": "Markets load", "path": "/markets", "expectSelector": ".market-card" },
+    { "name": "Explore loads", "path": "/explore", "expectSelector": ".post-card" },
+    { "name": "Verify page loads", "path": "/verify", "expectSelector": ".verify-tier" },
+    { "name": "Admin loads", "path": "/admin", "expectSelector": ".admin-metrics" }
+  ]
 }
