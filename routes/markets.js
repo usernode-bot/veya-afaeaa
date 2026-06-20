@@ -134,10 +134,10 @@ router.post('/markets/:id/resolve', async (req, res) => {
       else if (outcome === 'NO') payout = pos.side === 'NO' ? parseFloat(pos.shares) : 0;
       else payout = parseFloat(pos.shares) * parseFloat(pos.avg_price);
       if (payout > 0) {
-        const qText = String(m.question).slice(0, 80).replace(/'/g, "''");
+        const body = `${String(m.question).slice(0, 80)} → ${outcome}. Payout: $${payout.toFixed(2)}`;
         await pool.query(
-          `INSERT INTO notifications (user_id,type,title,body) VALUES ($1,'market_resolved','Market resolved','${qText} → ${outcome}. Payout: $${payout.toFixed(2)}')`,
-          [pos.user_id]
+          `INSERT INTO notifications (user_id,type,title,body) VALUES ($1,'market_resolved','Market resolved',$2)`,
+          [pos.user_id, body]
         );
       }
     }

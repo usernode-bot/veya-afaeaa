@@ -888,3 +888,57 @@ function render() {
 
 window.addEventListener('popstate', render);
 render();
+
+// ── UTK Wallet Gate ────────────────────────────────────────────────────────────
+(async function utkGate() {
+  // Decode JWT to check admin status without an API call
+  let isAdmin = false;
+  if (TOKEN) {
+    try {
+      const payload = JSON.parse(atob(TOKEN.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      isAdmin = !!payload.is_admin;
+    } catch {}
+  }
+  if (isAdmin) return;
+
+  // Wait up to 5s for the bridge
+  let walletAddr = '';
+  for (let i = 0; i < 50; i++) {
+    if (window.usernode && typeof window.usernode.getNodeAddress === 'function') break;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  try { walletAddr = await window.usernode.getNodeAddress(); } catch {}
+
+  // Check UTK balance via explorer proxy
+  let hasUtk = false;
+  if (walletAddr) {
+    try {
+      const r = await fetch(`/explorer-api/address/${encodeURIComponent(walletAddr)}/balances`);
+      if (r.ok) {
+        const data = await r.json();
+        const utk = (data.balances || data.tokens || []).find(b => (b.symbol || b.token) === 'UTK');
+        if (utk && parseFloat(utk.balance || utk.amount || 0) > 0) hasUtk = true;
+      }
+    } catch {}
+  }
+
+  if (hasUtk) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'utk-gate';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(10,12,18,0.97);display:flex;align-items:center;justify-content:center';
+  overlay.innerHTML = `
+    <div style="text-align:center;max-width:320px;padding:32px 24px">
+      <div style="font-size:32px;font-weight:800;letter-spacing:-1px;margin-bottom:4px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent">VEYA</div>
+      <div style="font-size:13px;color:#6b7280;margin-bottom:20px">Wallet-first onchain social</div>
+      <div style="width:40px;height:2px;background:#3b82f6;margin:0 auto 20px"></div>
+      <div style="font-size:16px;font-weight:600;margin-bottom:10px;color:#f9fafb">You need UTK tokens to use Veya</div>
+      <div style="font-size:13px;color:#9ca3af;margin-bottom:28px;line-height:1.6">UTK is the utility token of the Usernode ecosystem. Hold UTK in your wallet to access the full Veya experience.</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <a href="https://app.utktoken.io" target="_blank" rel="noopener noreferrer" style="display:block;background:#3b82f6;color:#fff;border-radius:10px;padding:13px 24px;font-size:14px;font-weight:600;text-decoration:none">Get UTK</a>
+        <button id="utk-gate-dismiss" style="background:transparent;color:#9ca3af;border:1px solid #374151;border-radius:10px;padding:13px 24px;font-size:13px;cursor:pointer">Continue Anyway</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('utk-gate-dismiss').addEventListener('click', () => overlay.remove());
+})();
