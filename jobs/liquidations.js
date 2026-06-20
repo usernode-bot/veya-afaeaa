@@ -1,75 +1,68 @@
-const INTERVAL_MS = 60 * 1000; // 60 seconds
+'use strict';
+const INTERVAL_MS = 60 * 1000;
 
 function start(pool) {
-  const run = async () => {
+  async function run() {
     try {
+      const liqThresholdRow = await pool.query(`SELECT value FROM app_config WHERE key='futures_liquidation_threshold'`);
+      const liqThreshold = parseFloat(liqThresholdRow.rows[0]?.value || 0.05);
+
       const { rows: positions } = await pool.query(
-        `SELECT fp.*, fm.mark_price FROM futures_positions fp
-         JOIN futures_markets fm ON fm.symbol=fp.market_symbol
-         WHERE fp.status='open' AND fp.is_paper_trade=FALSE`
+        `SELECT fp.*, fm.mark_price AS current_mark_price
+         FROM futures_positions fp
+         JOIN futures_markets fm ON fm.symbol=fp.symbol
+         WHERE fp.status='open' AND fm.paused=FALSE`
       );
+
       for (const pos of positions) {
-        const markPrice = parseFloat(pos.mark_price);
-        const entryPrice = parseFloat(pos.entry_price);
-        const liqPrice = parseFloat(pos.liquidation_price);
-        let isLiquidated = false;
-        if (pos.side === 'long' && markPrice <= liqPrice) isLiquidated = true;
-        if (pos.side === 'short' && markPrice >= liqPrice) isLiquidated = true;
-        if (!isLiquidated) {
-          const unrealizedPnl = pos.side === 'long'
-            ? (markPrice - entryPrice) * pos.size
-            : (entryPrice - markPrice) * pos.size;
+        try {
+          const markPrice = parseFloat(pos.current_mark_price);
+          const entryPrice = parseFloat(pos.entry_price);
+          const size = parseFloat(pos.size);
+          const margin = parseFloat(pos.margin);
+
+          const upnl = pos.direction === 'long'
+            ? (markPrice - entryPrice) * size
+            : (entryPrice - markPrice) * size;
+
+          const posValue = size * markPrice;
+          const marginRatio = posValue > 0 ? (margin + upnl) / posValue : 0;
+
           await pool.query(
-            'UPDATE futures_positions SET mark_price=$1, unrealized_pnl=$2 WHERE id=$3',
-            [markPrice, unrealizedPnl, pos.id]
+            `UPDATE futures_positions SET mark_price=$1, unrealized_pnl=$2 WHERE id=$3`,
+            [markPrice, upnl.toFixed(8), pos.id]
           );
-        } else {
-          await pool.query(
-            `UPDATE futures_positions SET status='liquidated', closed_at=NOW(), realized_pnl=$1, unrealized_pnl=0 WHERE id=$2`,
-            [-pos.margin, pos.id]
-          );
-          await pool.query(
-            `INSERT INTO futures_trades (position_id,user_id,market_symbol,side,size,price,fee,is_paper_trade,realized_pnl,created_at)
-             VALUES ($1,$2,$3,'liquidation',$4,$5,$6,FALSE,$7,NOW())`,
-            [pos.id, pos.user_id, pos.market_symbol, pos.size, markPrice, 0, -pos.margin]
-          );
-          await pool.query(
-            `INSERT INTO notifications (user_id,type,title,body)
-             VALUES ($1,'liquidation','Position Liquidated','Your ${pos.side} ${pos.market_symbol} position was liquidated at $${markPrice.toFixed(2)}')`,
-            [pos.user_id]
-          );
-          console.log(`[liquidations] Liquidated position ${pos.id} for user ${pos.user_id}`);
-        }
+
+          if (marginRatio < liqThreshold) {
+            const loss = -margin;
+            await pool.query(
+              `UPDATE futures_positions SET status='liquidated', closed_at=NOW(), realized_pnl=$1, unrealized_pnl=0 WHERE id=$2`,
+              [loss.toFixed(8), pos.id]
+            );
+            await pool.query(
+              `INSERT INTO futures_liquidations (position_id, user_id, symbol, size, entry_price, liquidation_price, loss)
+               VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+              [pos.id, pos.user_id, pos.symbol, size, entryPrice, markPrice, Math.abs(loss).toFixed(8)]
+            );
+            await pool.query(
+              `INSERT INTO notifications (user_id, type, title, body)
+               VALUES ($1,'liquidation','Position Liquidated','Your ${pos.direction} ${pos.symbol} position was liquidated at $${markPrice.toFixed(2)}. Loss: $${Math.abs(loss).toFixed(2)}')`,
+              [pos.user_id]
+            );
+            if (pos.mode === 'live') {
+              await pool.query(
+                `UPDATE user_profiles SET veya_balance=veya_balance+$1 WHERE user_id=$2`,
+                [loss.toFixed(8), pos.user_id]
+              );
+            }
+          }
+        } catch {}
       }
-      // Also update paper trade positions
-      const { rows: paperPos } = await pool.query(
-        `SELECT fp.*, fm.mark_price FROM futures_positions fp
-         JOIN futures_markets fm ON fm.symbol=fp.market_symbol
-         WHERE fp.status='open' AND fp.is_paper_trade=TRUE`
-      );
-      for (const pos of paperPos) {
-        const markPrice = parseFloat(pos.mark_price);
-        const entryPrice = parseFloat(pos.entry_price);
-        const liqPrice = parseFloat(pos.liquidation_price);
-        let isLiquidated = (pos.side === 'long' && markPrice <= liqPrice) || (pos.side === 'short' && markPrice >= liqPrice);
-        if (!isLiquidated) {
-          const unrealizedPnl = pos.side === 'long'
-            ? (markPrice - entryPrice) * pos.size
-            : (entryPrice - markPrice) * pos.size;
-          await pool.query('UPDATE futures_positions SET mark_price=$1, unrealized_pnl=$2 WHERE id=$3', [markPrice, unrealizedPnl, pos.id]);
-        } else {
-          await pool.query(
-            `UPDATE futures_positions SET status='liquidated', closed_at=NOW(), realized_pnl=$1, unrealized_pnl=0 WHERE id=$2`,
-            [-pos.margin, pos.id]
-          );
-        }
-      }
-    } catch (err) {
-      console.error('[liquidations] Error:', err.message);
-    }
-  };
-  run();
+    } catch {}
+  }
+
   setInterval(run, INTERVAL_MS);
+  setTimeout(run, 5000);
 }
 
 module.exports = { start };

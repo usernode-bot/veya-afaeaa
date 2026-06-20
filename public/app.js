@@ -1,1423 +1,890 @@
 'use strict';
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
+// ── Constants ──────────────────────────────────────────────────────────────────
 const TOKEN = window.__TOKEN__ || '';
-const API_HEADERS = TOKEN ? { 'x-usernode-token': TOKEN, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+const APP = document.getElementById('app');
 
-async function api(method, path, body) {
-  const opts = { method, headers: API_HEADERS };
-  if (body) opts.body = JSON.stringify(body);
-  const res = await fetch('/api' + path, opts);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ── Toast ─────────────────────────────────────────────────────────────────────
 function toast(msg, type = 'info') {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
   el.textContent = msg;
-  document.body.appendChild(el);
-  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 3000);
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
 }
 
-// ── Router ────────────────────────────────────────────────────────────────────
-const root = document.getElementById('root');
-let currentPath = '';
+async function api(method, path, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (TOKEN) headers['x-usernode-token'] = TOKEN;
+  const opts = { method, headers };
+  if (body != null) opts.body = JSON.stringify(body);
+  const r = await fetch('/api' + path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  return data;
+}
 
 function navigate(path) {
-  if (path === currentPath) return;
-  history.pushState(null, '', path + (TOKEN ? '?token=' + encodeURIComponent(TOKEN) : ''));
-  render(path);
+  history.pushState(null, '', path);
+  render();
 }
 
-window.addEventListener('popstate', () => render(window.location.pathname));
-
-function render(path) {
-  currentPath = path;
-  root.innerHTML = '';
-
-  const parts = path.replace(/^\//, '').split('/');
-  const page = parts[0] || 'home';
-  const sub = parts[1] || '';
-
-  const shell = document.createElement('div');
-  shell.className = 'page-content';
-
-  if (page === 'futures' && sub) {
-    renderFuturesChart(shell, sub.toUpperCase());
-  } else if (page === 'futures-portfolio') {
-    renderFuturesPortfolio(shell);
-  } else if (page === 'home' || page === '') {
-    renderHome(shell);
-  } else if (page === 'trade') {
-    renderTrade(shell);
-  } else if (page === 'futures') {
-    renderFuturesMarkets(shell);
-  } else if (page === 'earn') {
-    renderEarn(shell);
-  } else if (page === 'markets') {
-    renderMarkets(shell);
-  } else if (page === 'explore') {
-    renderExplore(shell);
-  } else if (page === 'verify') {
-    renderVerify(shell);
-  } else if (page === 'profile') {
-    renderProfile(shell, sub);
-  } else if (page === 'post') {
-    renderPost(shell, sub);
-  } else if (page === 'market') {
-    renderMarketDetail(shell, sub);
-  } else if (page === 'token') {
-    renderTokenDetail(shell, sub);
-  } else if (page === 'nfts') {
-    renderNFTs(shell);
-  } else if (page === 'opinions') {
-    renderExplore(shell);
-  } else {
-    renderHome(shell);
-  }
-
-  root.appendChild(shell);
-  root.appendChild(buildNav(page));
-  updateActiveNav(page);
+function fmt(n, d = 2) {
+  const v = parseFloat(n);
+  if (isNaN(v)) return '—';
+  if (Math.abs(v) >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+  if (Math.abs(v) >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+  if (Math.abs(v) >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+  return v.toFixed(d);
 }
 
-// ── Bottom Nav ────────────────────────────────────────────────────────────────
-const NAV_ITEMS = [
-  { id: 'home',    label: 'Home',    path: '/home',    icon: '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12L12 3l9 9M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9"/></svg>' },
-  { id: 'trade',   label: 'Trade',   path: '/trade',   icon: '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>' },
-  { id: 'futures', label: 'Futures', path: '/futures', icon: '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>' },
-  { id: 'earn',    label: 'Earn',    path: '/earn',    icon: '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 10v1m-6.364-5h12.728M3.343 9.343a8 8 0 1011.314 11.314A8 8 0 003.343 9.343z"/></svg>' },
-  { id: 'markets', label: 'Predict', path: '/markets', icon: '<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>' },
+function pct(n) {
+  const v = parseFloat(n);
+  if (isNaN(v)) return '<span>—</span>';
+  const cls = v >= 0 ? 'price-up' : 'price-down';
+  return `<span class="${cls}">${v >= 0 ? '+' : ''}${v.toFixed(2)}%</span>`;
+}
+
+function tierBadge(tier, isAdmin) {
+  if (isAdmin) return `<span class="tier-badge tier-admin">Admin</span>`;
+  const map = { 0: ['tier-0','Basic'], 1: ['tier-1','Social'], 2: ['tier-2','Premium'] };
+  const [cls, label] = map[tier] || map[0];
+  return `<span class="tier-badge ${cls}">${label}</span>`;
+}
+
+function timeAgo(iso) {
+  const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s/60)}m`;
+  if (s < 86400) return `${Math.floor(s/3600)}h`;
+  return `${Math.floor(s/86400)}d`;
+}
+
+function skel(h, w = '100%', mb = '8px') {
+  return `<div class="skeleton" style="height:${h}px;width:${w};margin-bottom:${mb}"></div>`;
+}
+
+// ── Bottom nav ─────────────────────────────────────────────────────────────────
+const NAV = [
+  { id:'home',    label:'Home',    path:'/home' },
+  { id:'trade',   label:'Trade',   path:'/trade' },
+  { id:'futures', label:'Futures', path:'/futures' },
+  { id:'earn',    label:'Earn',    path:'/earn' },
+  { id:'markets', label:'Predict', path:'/markets' },
+  { id:'explore', label:'Explore', path:'/explore' },
 ];
 
-function buildNav(activePage) {
-  const nav = document.createElement('nav');
-  nav.className = 'bottom-nav';
-  nav.id = 'bottom-nav';
-  NAV_ITEMS.forEach(item => {
-    const btn = document.createElement('button');
-    btn.className = 'nav-btn' + (item.id === activePage || (activePage === '' && item.id === 'home') ? ' active' : '');
-    btn.dataset.navId = item.id;
-    btn.innerHTML = item.icon + `<span>${item.label}</span>`;
-    btn.addEventListener('click', () => navigate(item.path));
-    nav.appendChild(btn);
-  });
-  return nav;
+const NAV_ICONS = {
+  home:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12l9-9 9 9M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9"/></svg>',
+  trade:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16V4m0 0L3 8m4-4 4 4M17 8v12m0 0 4-4m-4 4-4-4"/></svg>',
+  futures: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8-8 8-4-4-6 6"/></svg>',
+  earn:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8v-1m0 10v1"/></svg>',
+  markets: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>',
+  explore: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" stroke-linejoin="round" d="M14.828 9.172l-5.657 5.657m5.657-5.657L9.171 9.17"/></svg>',
+};
+
+function bottomNav(active) {
+  return `<nav class="bottom-nav">${NAV.map(n => `
+    <button class="nav-btn${n.id===active?' active':''}" onclick="navigate('${n.path}')">${NAV_ICONS[n.id]}<span>${n.label}</span></button>
+  `).join('')}</nav>`;
 }
 
-function updateActiveNav(page) {
-  document.querySelectorAll('.nav-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.navId === page || (page === '' && btn.dataset.navId === 'home'));
-  });
-}
-
-// ── Skeleton helpers ──────────────────────────────────────────────────────────
-function skeletonCard(h = 80) {
-  return `<div class="skeleton rounded-xl mb-3" style="height:${h}px"></div>`;
-}
-
-function pageHeader(title, subtitle, actions = '') {
-  return `<div class="flex items-center justify-between px-4 pt-4 pb-2">
-    <div><h1 class="text-xl font-bold">${escHtml(title)}</h1>${subtitle ? `<p class="text-gray-400 text-sm">${escHtml(subtitle)}</p>` : ''}</div>
-    ${actions}
-  </div>`;
-}
-
-function escHtml(str) {
-  return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function fmtNum(n, dec = 2) {
-  const num = parseFloat(n);
-  if (isNaN(num)) return '—';
-  if (Math.abs(num) >= 1e9) return (num / 1e9).toFixed(1) + 'B';
-  if (Math.abs(num) >= 1e6) return (num / 1e6).toFixed(1) + 'M';
-  if (Math.abs(num) >= 1e3) return (num / 1e3).toFixed(1) + 'K';
-  return num.toFixed(dec);
-}
-
-function fmtPct(n) {
-  const num = parseFloat(n);
-  if (isNaN(num)) return '—';
-  const sign = num >= 0 ? '+' : '';
-  return `<span class="${num >= 0 ? 'price-up' : 'price-down'}">${sign}${num.toFixed(2)}%</span>`;
-}
-
-function tierBadge(tier) {
-  const labels = ['Basic', 'Social', 'Premium'];
-  const icons = ['🟤', '🥈', '🥇'];
-  return `<span class="text-xs px-2 py-0.5 rounded-full tier-badge-${tier}">${icons[tier] || ''} ${labels[tier] || 'Basic'}</span>`;
-}
-
-// ── Home ──────────────────────────────────────────────────────────────────────
-async function renderHome(container) {
-  container.innerHTML = `
-    <div class="p-4">
-      ${skeletonCard(120)}
-      ${skeletonCard(60)}
-      ${skeletonCard(60)}
-      ${skeletonCard(60)}
-    </div>`;
-
-  let user = null;
-  try {
-    const data = await api('GET', '/user/me');
-    user = data.user;
-  } catch (e) {
-    user = { username: 'Anonymous', verification_tier: 0, veya_balance: 0 };
-  }
-
-  let tokens = [];
-  try {
-    const d = await api('GET', '/tokens');
-    tokens = (d.tokens || []).slice(0, 8);
-  } catch {}
-
-  container.innerHTML = `
-    <div class="p-4 space-y-4">
+// ── Home ───────────────────────────────────────────────────────────────────────
+async function renderHome() {
+  APP.innerHTML = `
+    <div class="page-content">
       <div class="wallet-card">
-        <div class="flex items-start justify-between mb-3">
+        ${skel(11,'45%','6px')}
+        ${skel(36,'50%','6px')}
+        ${skel(11,'35%','16px')}
+        <div style="display:flex;gap:8px">${skel(30,'23%','0')}${skel(30,'23%','0')}${skel(30,'23%','0')}${skel(30,'23%','0')}</div>
+      </div>
+      <div class="section-title">Markets</div>
+      <div style="padding:0 12px">${skel(48,'100%','8px')}${skel(48,'100%','8px')}${skel(48,'100%','8px')}</div>
+    </div>
+    ${bottomNav('home')}`;
+
+  let user = { username: 'User', verification_tier: 0, veya_balance: '0', is_admin: false };
+  let tokens = [];
+  try { const d = await api('GET', '/user/me'); user = d.user || user; } catch {}
+  try { const d = await api('GET', '/tokens'); tokens = (d.tokens || []).slice(0, 6); } catch {}
+
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="wallet-card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
           <div>
-            <div class="text-gray-300 text-sm">Welcome back</div>
-            <div class="text-xl font-bold">${escHtml(user.display_name || user.username)}</div>
+            <div class="address">${esc(user.wallet_address || '@' + user.username)}</div>
+            <div class="balance">$${fmt(user.veya_balance || 0)}</div>
+            <div class="balance-usd">VEYA Balance</div>
           </div>
-          <div>${tierBadge(user.verification_tier || 0)}</div>
+          ${tierBadge(user.verification_tier || 0, user.is_admin)}
         </div>
-        <div class="text-3xl font-bold mb-1">$${fmtNum(user.veya_balance || 0)}</div>
-        <div class="text-gray-400 text-sm">VEYA Balance</div>
-        <div class="mt-4 flex gap-2">
-          <button class="btn btn-primary flex-1" onclick="navigate('/trade')">Swap</button>
-          <button class="btn btn-secondary flex-1" onclick="navigate('/earn')">Earn</button>
-          <button class="btn btn-secondary flex-1" onclick="navigate('/futures')">Trade</button>
+        <div class="quick-actions">
+          <button class="quick-btn" onclick="navigate('/trade')">${NAV_ICONS.trade}Trade</button>
+          <button class="quick-btn" onclick="navigate('/earn')">${NAV_ICONS.earn}Earn</button>
+          <button class="quick-btn" onclick="navigate('/futures')">${NAV_ICONS.futures}Futures</button>
+          <button class="quick-btn" onclick="navigate('/verify')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>Verify</button>
         </div>
       </div>
-
+      <div class="section-title">Markets</div>
       <div>
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="font-bold">Markets</h2>
-          <button class="text-purple-400 text-sm" onclick="navigate('/trade')">See all</button>
-        </div>
-        <div class="space-y-2">
-          ${tokens.map(t => `
-            <div class="card flex items-center justify-between cursor-pointer hover:border-purple-700 transition-colors" onclick="navigate('/token/${escHtml(t.symbol)}')">
-              <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-full bg-purple-900 flex items-center justify-center text-xs font-bold">${escHtml(t.symbol.slice(0,2))}</div>
-                <div>
-                  <div class="font-semibold text-sm">${escHtml(t.symbol)}</div>
-                  <div class="text-gray-400 text-xs">${escHtml(t.name || '')}</div>
-                </div>
-              </div>
-              <div class="text-right">
-                <div class="font-semibold text-sm">$${fmtNum(t.price_usd)}</div>
-                <div class="text-xs">${fmtPct(t.change_24h)}</div>
-              </div>
-            </div>`).join('')}
-        </div>
+        ${tokens.map(t => `
+          <div class="stat-row" style="padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer" onclick="navigate('/trade')">
+            <div style="display:flex;align-items:center;gap:12px">
+              <div style="width:32px;height:32px;border-radius:50%;background:var(--blue);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${esc(t.symbol.slice(0,2))}</div>
+              <div><div style="font-weight:600;font-size:13px">${esc(t.symbol)}</div><div class="stat-label">${esc(t.name||'')}</div></div>
+            </div>
+            <div style="text-align:right"><div style="font-weight:600;font-size:13px">$${fmt(t.price_usd)}</div><div style="font-size:11px">${pct(t.change_24h)}</div></div>
+          </div>`).join('') || '<div class="empty-state">No tokens</div>'}
       </div>
-
-      <div>
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="font-bold">Quick Actions</h2>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <button class="card text-left hover:border-purple-700 transition-colors" onclick="navigate('/futures')">
-            <div class="text-2xl mb-1">📈</div>
-            <div class="font-semibold text-sm">Futures</div>
-            <div class="text-gray-400 text-xs">Trade with leverage</div>
-          </button>
-          <button class="card text-left hover:border-purple-700 transition-colors" onclick="navigate('/markets')">
-            <div class="text-2xl mb-1">🎯</div>
-            <div class="font-semibold text-sm">Predict</div>
-            <div class="text-gray-400 text-xs">Prediction markets</div>
-          </button>
-          <button class="card text-left hover:border-purple-700 transition-colors" onclick="navigate('/earn')">
-            <div class="text-2xl mb-1">💰</div>
-            <div class="font-semibold text-sm">Earn</div>
-            <div class="text-gray-400 text-xs">Stake & LP</div>
-          </button>
-          <button class="card text-left hover:border-purple-700 transition-colors" onclick="navigate('/explore')">
-            <div class="text-2xl mb-1">💬</div>
-            <div class="font-semibold text-sm">Social</div>
-            <div class="text-gray-400 text-xs">Posts & polls</div>
-          </button>
-        </div>
+      <div style="padding:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="navigate('/markets')">Predict Markets</button>
+        <button class="btn btn-secondary btn-sm" onclick="navigate('/explore')">Explore</button>
+        <button class="btn btn-secondary btn-sm" onclick="navigate('/nfts')">NFTs</button>
+        ${user.is_admin ? `<button class="btn btn-secondary btn-sm" onclick="window.location='/admin'">Admin</button>` : ''}
       </div>
-
-      <div class="flex justify-center gap-4 pb-4">
-        <button class="text-purple-400 text-sm" onclick="navigate('/verify')">Verify Account</button>
-        <button class="text-purple-400 text-sm" onclick="navigate('/nfts')">NFTs</button>
-        <button class="text-gray-400 text-sm" onclick="navigate('/profile/')">My Profile</button>
-      </div>
-    </div>`;
+    </div>
+    ${bottomNav('home')}`;
 }
 
-// ── Trade ─────────────────────────────────────────────────────────────────────
-async function renderTrade(container) {
-  container.innerHTML = `<div class="p-4">${skeletonCard(300)}${skeletonCard(200)}</div>`;
+// ── Trade ──────────────────────────────────────────────────────────────────────
+async function renderTrade() {
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="page-header"><h2>Trade</h2></div>
+      <div style="padding:16px">
+        <div class="swap-panel">
+          <div style="margin-bottom:12px">
+            <div class="input-label">From</div>
+            <div class="swap-token">${skel(16,'60%','0')}</div>
+          </div>
+          <div class="swap-arrow">↓</div>
+          <div style="margin-bottom:16px">
+            <div class="input-label">To</div>
+            <div class="swap-token">${skel(16,'60%','0')}</div>
+          </div>
+          <button class="btn btn-primary btn-full" disabled>Loading...</button>
+        </div>
+      </div>
+    </div>
+    ${bottomNav('trade')}`;
 
   let tokens = [];
-  try {
-    const d = await api('GET', '/tokens');
-    tokens = d.tokens || [];
-  } catch (e) {
-    container.innerHTML = `<div class="p-4 text-center text-gray-400">Failed to load tokens: ${escHtml(e.message)}</div>`;
-    return;
-  }
+  try { const d = await api('GET', '/tokens'); tokens = d.tokens || []; } catch {}
 
-  container.innerHTML = `
-    <div class="p-4 space-y-4">
-      ${pageHeader('Trade', 'Swap tokens instantly')}
+  const mkSel = (id, selIdx) => `<select id="${id}" style="background:transparent;border:none;color:var(--text);font-size:14px;font-weight:600;outline:none;flex:1">
+    ${tokens.map((t, i) => `<option value="${esc(t.symbol)}" ${i===selIdx?'selected':''}>${esc(t.symbol)} — $${fmt(t.price_usd)}</option>`).join('')}
+  </select>`;
 
-      <div class="swap-panel">
-        <div class="mb-4">
-          <label class="text-gray-400 text-xs mb-1 block">From</label>
-          <div class="flex gap-2">
-            <select id="swap-from" class="flex-1">
-              ${tokens.map(t => `<option value="${escHtml(t.symbol)}">${escHtml(t.symbol)}</option>`).join('')}
-            </select>
-            <input type="number" id="swap-amount" placeholder="0.00" class="w-28 text-right" min="0">
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="page-header"><h2>Trade</h2></div>
+      <div style="padding:16px">
+        <div class="swap-panel">
+          <div style="margin-bottom:12px">
+            <div class="input-label">From</div>
+            <div class="swap-token">${mkSel('sw-from',0)}<input type="number" id="sw-amt" placeholder="0.00" min="0" style="width:100px;text-align:right;background:transparent;border:none;color:var(--text);font-size:16px;font-weight:700;outline:none"></div>
           </div>
-        </div>
-        <div class="flex justify-center my-2">
-          <button onclick="swapTokens()" class="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center hover:bg-purple-700 transition-colors text-lg">⇅</button>
-        </div>
-        <div class="mb-4">
-          <label class="text-gray-400 text-xs mb-1 block">To</label>
-          <div class="flex gap-2">
-            <select id="swap-to" class="flex-1">
-              ${tokens.map((t, i) => `<option value="${escHtml(t.symbol)}" ${i === 1 ? 'selected' : ''}>${escHtml(t.symbol)}</option>`).join('')}
-            </select>
-            <input type="text" id="swap-receive" placeholder="0.00" class="w-28 text-right" readonly>
+          <div class="swap-arrow"><button onclick="swapOrder()" class="btn btn-secondary btn-sm" style="border-radius:50%;width:32px;height:32px;padding:0">⇅</button></div>
+          <div style="margin-bottom:16px">
+            <div class="input-label">To</div>
+            <div class="swap-token">${mkSel('sw-to',1)}<input type="text" id="sw-recv" placeholder="0.00" readonly style="width:100px;text-align:right;background:transparent;border:none;color:var(--text);font-size:16px;font-weight:700;outline:none"></div>
           </div>
+          <div id="sw-rate" class="stat-label" style="text-align:center;margin-bottom:12px;font-size:12px"></div>
+          <button onclick="doSwap()" class="btn btn-primary btn-full btn-lg">Swap</button>
         </div>
-        <div id="swap-rate" class="text-gray-400 text-xs mb-4 text-center"></div>
-        <button onclick="executeSwap()" class="btn btn-primary w-full text-base py-3">Connect Wallet to Swap</button>
-      </div>
-
-      <div>
-        <h2 class="font-bold mb-3 px-1">All Tokens</h2>
-        <div class="space-y-2">
+        <div class="section-title" style="margin-top:16px">All Tokens</div>
+        <div>
           ${tokens.map(t => `
-            <div class="card flex items-center justify-between cursor-pointer hover:border-purple-700 transition-colors" onclick="navigate('/token/${escHtml(t.symbol)}')">
-              <div class="flex items-center gap-3">
-                <div class="w-9 h-9 rounded-full bg-purple-900 flex items-center justify-center text-xs font-bold">${escHtml(t.symbol.slice(0,2))}</div>
-                <div>
-                  <div class="font-semibold">${escHtml(t.symbol)}</div>
-                  <div class="text-gray-400 text-sm">${escHtml(t.name || '')}</div>
-                </div>
+            <div class="stat-row" style="padding:10px 16px;border-bottom:1px solid var(--border)">
+              <div style="display:flex;align-items:center;gap:12px">
+                <div style="width:32px;height:32px;border-radius:50%;background:var(--blue);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${esc(t.symbol.slice(0,2))}</div>
+                <div><div style="font-weight:600">${esc(t.symbol)}</div><div class="stat-label">${esc(t.name||'')}</div></div>
               </div>
-              <div class="text-right">
-                <div class="font-semibold">$${fmtNum(t.price_usd)}</div>
-                <div class="text-xs">${fmtPct(t.change_24h)} &bull; MC $${fmtNum(t.market_cap)}</div>
-              </div>
+              <div style="text-align:right"><div style="font-weight:600">$${fmt(t.price_usd)}</div><div style="font-size:11px">${pct(t.change_24h)}</div></div>
             </div>`).join('')}
         </div>
       </div>
-    </div>`;
+    </div>
+    ${bottomNav('trade')}`;
 
-  // Live rate update
-  const fromSel = document.getElementById('swap-from');
-  const toSel = document.getElementById('swap-to');
-  const amountIn = document.getElementById('swap-amount');
-  const amountOut = document.getElementById('swap-receive');
-  const rateEl = document.getElementById('swap-rate');
+  const updateRate = () => {
+    const from = tokens.find(t => t.symbol === document.getElementById('sw-from')?.value);
+    const to = tokens.find(t => t.symbol === document.getElementById('sw-to')?.value);
+    const rateEl = document.getElementById('sw-rate');
+    if (from && to && rateEl) {
+      const r = parseFloat(to.price_usd) > 0 ? parseFloat(from.price_usd) / parseFloat(to.price_usd) : 0;
+      rateEl.textContent = `1 ${from.symbol} ≈ ${r.toFixed(6)} ${to.symbol}`;
+    }
+    const amt = parseFloat(document.getElementById('sw-amt')?.value);
+    const recv = document.getElementById('sw-recv');
+    if (recv && !isNaN(amt) && from && to && parseFloat(to.price_usd) > 0) {
+      recv.value = (amt * parseFloat(from.price_usd) / parseFloat(to.price_usd)).toFixed(6);
+    }
+  };
 
-  function updateRate() {
-    const from = tokens.find(t => t.symbol === fromSel.value);
-    const to = tokens.find(t => t.symbol === toSel.value);
-    if (!from || !to || !amountIn.value) { amountOut.value = ''; rateEl.textContent = ''; return; }
-    const rate = parseFloat(from.price_usd) / parseFloat(to.price_usd);
-    const out = parseFloat(amountIn.value) * rate;
-    amountOut.value = out.toFixed(6);
-    rateEl.textContent = `1 ${from.symbol} ≈ ${rate.toFixed(6)} ${to.symbol}`;
-  }
-  [fromSel, toSel, amountIn].forEach(el => el.addEventListener('input', updateRate));
+  document.getElementById('sw-from')?.addEventListener('change', updateRate);
+  document.getElementById('sw-to')?.addEventListener('change', updateRate);
+  document.getElementById('sw-amt')?.addEventListener('input', updateRate);
   updateRate();
+
+  window.swapOrder = () => {
+    const f = document.getElementById('sw-from'), t = document.getElementById('sw-to');
+    if (f && t) { const tmp = f.value; f.value = t.value; t.value = tmp; updateRate(); }
+  };
+
+  window.doSwap = async () => {
+    const from_token = document.getElementById('sw-from')?.value;
+    const to_token = document.getElementById('sw-to')?.value;
+    const amount = parseFloat(document.getElementById('sw-amt')?.value);
+    if (!from_token || !to_token || !amount || amount <= 0) return toast('Enter an amount', 'error');
+    if (from_token === to_token) return toast('Select different tokens', 'error');
+    try {
+      const d = await api('POST', '/swap', { from_token, to_token, amount });
+      toast(`Swapped! Received ${fmt(d.received)} ${to_token}`, 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  };
 }
 
-window.swapTokens = function() {
-  const f = document.getElementById('swap-from');
-  const t = document.getElementById('swap-to');
-  const fv = f.value; f.value = t.value; t.value = fv;
-};
-
-window.executeSwap = async function() {
-  const from = document.getElementById('swap-from')?.value;
-  const to = document.getElementById('swap-to')?.value;
-  const amount = document.getElementById('swap-amount')?.value;
-  if (!amount || !from || !to) return toast('Fill in swap details', 'error');
-  try {
-    toast('Swap submitted (demo mode)', 'success');
-  } catch (e) {
-    toast(e.message, 'error');
-  }
-};
-
-// ── Futures Markets ───────────────────────────────────────────────────────────
-async function renderFuturesMarkets(container) {
-  container.innerHTML = `<div class="p-4">${skeletonCard(60).repeat(6)}</div>`;
+// ── Futures markets ────────────────────────────────────────────────────────────
+async function renderFutures() {
+  const skelRows = Array.from({length:6}, () => `
+    <div class="futures-market-row">
+      <div>${skel(16,'90px','4px')}${skel(12,'60px','0')}</div>
+      <div style="text-align:right">${skel(16,'80px','4px')}${skel(12,'55px','0')}</div>
+    </div>`).join('');
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="page-header"><h2>Futures</h2></div>
+      ${skelRows}
+    </div>
+    ${bottomNav('futures')}`;
 
   let markets = [];
-  try {
-    const d = await api('GET', '/futures/markets');
-    markets = d.markets || [];
-  } catch (e) {
-    container.innerHTML = `<div class="p-4 text-center text-gray-400">Failed to load: ${escHtml(e.message)}</div>`;
-    return;
-  }
+  try { const d = await api('GET', '/futures/markets'); markets = d.markets || []; } catch {}
 
-  container.innerHTML = `
-    <div>
-      ${pageHeader('Futures', 'Perpetual contracts')}
-      <div class="flex gap-2 px-4 mb-3">
-        <button class="btn btn-primary text-xs" onclick="navigate('/futures-portfolio')">My Portfolio</button>
-        <button class="btn btn-secondary text-xs" onclick="navigate('/futures/leaderboard')">Leaderboard</button>
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="page-header">
+        <h2>Futures</h2>
+        <button class="btn btn-sm btn-secondary" onclick="navigate('/futures-portfolio')">Portfolio</button>
       </div>
-      <div>
-        <div class="flex text-gray-500 text-xs px-4 py-2 border-b border-gray-800">
-          <span class="flex-1">Market</span>
-          <span class="w-24 text-right">Price</span>
-          <span class="w-16 text-right">24h</span>
-          <span class="w-20 text-right">Volume</span>
-        </div>
-        ${markets.map(m => `
-          <div class="futures-market-row" onclick="navigate('/futures/${escHtml(m.symbol)}')">
-            <div class="flex-1">
-              <div class="font-semibold text-sm">${escHtml(m.symbol)}</div>
-              <div class="text-gray-400 text-xs">${escHtml(m.base_currency || '')} Perp</div>
-            </div>
-            <div class="w-24 text-right font-mono text-sm">$${fmtNum(m.mark_price)}</div>
-            <div class="w-16 text-right text-xs">${fmtPct(m.change_24h)}</div>
-            <div class="w-20 text-right text-xs text-gray-400">$${fmtNum(m.volume_24h)}</div>
-          </div>`).join('')}
-        ${markets.length === 0 ? '<div class="text-center text-gray-400 py-8">No markets available</div>' : ''}
-      </div>
-    </div>`;
+      <div class="disclaimer">Perpetual futures — up to 50× leverage. Simulated trading available for all users.</div>
+      ${markets.length ? markets.map(m => `
+        <div class="futures-market-row" onclick="navigate('/futures/${esc(m.symbol)}')">
+          <div>
+            <div class="symbol">${esc(m.symbol)}</div>
+            <div style="font-size:12px;color:var(--text-muted)">${(parseFloat(m.funding_rate||0)*100).toFixed(4)}% funding</div>
+          </div>
+          <div style="text-align:right">
+            <div class="price">$${fmt(m.mark_price)}</div>
+            <div style="font-size:12px">${pct(m.change_24h)} <span class="chip">OI $${fmt(m.open_interest)}</span></div>
+          </div>
+        </div>`).join('') : '<div class="empty-state">No markets available</div>'}
+    </div>
+    ${bottomNav('futures')}`;
 }
 
-// ── Futures Chart ─────────────────────────────────────────────────────────────
-async function renderFuturesChart(container, symbol) {
-  container.innerHTML = `
-    <div>
-      ${pageHeader(symbol, 'Perpetual')}
-      <div class="px-4 pb-2">
-        <div class="skeleton rounded-xl" style="height:260px"></div>
+// ── Futures chart ──────────────────────────────────────────────────────────────
+async function renderFuturesChart(symbol) {
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="page-header">
+        <button class="btn btn-sm btn-secondary" onclick="navigate('/futures')">← Back</button>
+        <h2>${esc(symbol)}</h2>
+        <button class="btn btn-sm btn-secondary" onclick="navigate('/futures-portfolio')">Portfolio</button>
       </div>
-      <div class="p-4">${skeletonCard(60).repeat(3)}</div>
-    </div>`;
+      <canvas id="ohlc" class="futures-chart" height="240"></canvas>
+      <div style="padding:16px">
+        <div class="tab-pills" style="margin-bottom:16px">
+          <button class="tab-pill active" id="dir-long" onclick="setDir('long')">Long</button>
+          <button class="tab-pill" id="dir-short" onclick="setDir('short')">Short</button>
+        </div>
+        <div style="margin-bottom:12px">
+          <div class="input-label">Leverage: <span id="lev-val">10×</span></div>
+          <input type="range" id="lev" min="1" max="50" value="10" style="width:100%" oninput="document.getElementById('lev-val').textContent=this.value+'×'">
+        </div>
+        <div style="margin-bottom:12px">
+          <div class="input-label">Margin (VEYA)</div>
+          <input type="number" id="order-amt" placeholder="100" min="1" style="width:100%">
+        </div>
+        <div style="margin-bottom:12px">
+          <div class="input-label">Mode</div>
+          <select id="order-mode" style="width:100%">
+            <option value="simulated">Simulated (risk-free)</option>
+            <option value="live">Live (real VEYA)</option>
+          </select>
+        </div>
+        <button id="place-btn" class="btn btn-green btn-full">Place Long Order</button>
+        <div id="pos-section" style="margin-top:16px"></div>
+      </div>
+    </div>
+    ${bottomNav('futures')}`;
 
-  let market = null, candles = [];
+  let direction = 'long';
+  window.setDir = (dir) => {
+    direction = dir;
+    document.getElementById('dir-long')?.classList.toggle('active', dir==='long');
+    document.getElementById('dir-short')?.classList.toggle('active', dir==='short');
+    const b = document.getElementById('place-btn');
+    if (b) { b.textContent = `Place ${dir.charAt(0).toUpperCase()+dir.slice(1)} Order`; b.className = `btn btn-full ${dir==='long'?'btn-green':'btn-red'}`; }
+  };
+
+  document.getElementById('place-btn')?.addEventListener('click', async () => {
+    const amount = parseFloat(document.getElementById('order-amt')?.value);
+    const leverage = parseInt(document.getElementById('lev')?.value);
+    const mode = document.getElementById('order-mode')?.value;
+    if (!amount || amount <= 0) return toast('Enter an amount', 'error');
+    try {
+      await api('POST', '/futures/orders', { symbol, direction, amount, leverage, mode, order_type: 'market' });
+      toast('Order placed!', 'success');
+      loadPositions();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  window.closePosition = async (id) => {
+    try { await api('POST', `/futures/positions/${id}/close`, {}); toast('Position closed', 'success'); loadPositions(); }
+    catch (e) { toast(e.message, 'error'); }
+  };
+
+  async function loadPositions() {
+    const sec = document.getElementById('pos-section');
+    if (!sec) return;
+    try {
+      const d = await api('GET', '/futures/positions');
+      const mine = (d.positions||[]).filter(p => p.symbol===symbol && p.status==='open');
+      if (!mine.length) { sec.innerHTML = ''; return; }
+      sec.innerHTML = `<div class="section-title">Open Positions</div>` + mine.map(p => `
+        <div class="card" style="margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+            <span class="${p.direction==='long'?'price-up':'price-down'}">${p.direction.toUpperCase()}</span>
+            <span class="leverage-badge">${p.leverage}×</span>
+            <span class="${parseFloat(p.unrealized_pnl)>=0?'pnl-pos':'pnl-neg'}">${parseFloat(p.unrealized_pnl)>=0?'+':''}$${fmt(p.unrealized_pnl)}</span>
+          </div>
+          <div class="stat-row"><span class="stat-label">Entry</span><span>$${fmt(p.entry_price)}</span></div>
+          <div class="stat-row"><span class="stat-label">Mark</span><span>$${fmt(p.mark_price)}</span></div>
+          <div class="stat-row"><span class="stat-label">Margin</span><span>$${fmt(p.margin)} (${p.mode})</span></div>
+          <button class="btn btn-red btn-sm btn-full" style="margin-top:8px" onclick="closePosition('${p.id}')">Close</button>
+        </div>`).join('');
+    } catch {}
+  }
+
   try {
-    const [md, cd] = await Promise.all([
-      api('GET', `/futures/markets/${symbol}`),
-      api('GET', `/futures/candles/${symbol}?interval=15m&limit=80`),
-    ]);
-    market = md.market;
-    candles = cd.candles || [];
-  } catch (e) {
-    container.innerHTML = `<div class="p-4 text-center text-gray-400">Failed to load ${escHtml(symbol)}: ${escHtml(e.message)}</div>`;
-    return;
-  }
+    const d = await api('GET', `/futures/markets/${symbol}/candles`);
+    const c = d.candles || [];
+    if (c.length) drawOHLC(document.getElementById('ohlc'), c);
+  } catch {}
 
-  const fundingRate = parseFloat(market.funding_rate || 0);
-  const maxLev = market.max_leverage || 20;
-
-  container.innerHTML = `
-    <div>
-      <div class="flex items-center gap-2 px-4 pt-4 pb-2">
-        <button onclick="navigate('/futures')" class="text-gray-400 text-lg">←</button>
-        <div class="flex-1">
-          <h1 class="text-xl font-bold">${escHtml(symbol)}</h1>
-          <div class="text-gray-400 text-xs">Perpetual &bull; Max ${maxLev}x</div>
-        </div>
-        <div class="text-right">
-          <div class="text-xl font-bold">$${fmtNum(market.mark_price)}</div>
-          <div class="text-xs">${fmtPct(market.change_24h)}</div>
-        </div>
-      </div>
-
-      <div class="px-4 pb-2 flex gap-4 text-xs text-gray-400">
-        <span>Vol: <span class="text-white">$${fmtNum(market.volume_24h)}</span></span>
-        <span>OI: <span class="text-white">$${fmtNum(market.open_interest)}</span></span>
-        <span>Funding: <span class="${fundingRate >= 0 ? 'text-green-400' : 'text-red-400'}">${(fundingRate * 100).toFixed(4)}%</span></span>
-      </div>
-
-      <div class="px-4 pb-3">
-        <canvas id="futures-canvas" class="futures-chart" height="220"></canvas>
-      </div>
-
-      <div class="px-4 space-y-3">
-        <div class="flex gap-2 mb-2">
-          <button id="side-long" onclick="setSide('long')" class="btn btn-green flex-1 opacity-100">Long</button>
-          <button id="side-short" onclick="setSide('short')" class="btn btn-red flex-1 opacity-50">Short</button>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="text-gray-400 text-xs mb-1 block">Size (USD)</label>
-            <input type="number" id="futures-size" placeholder="100" min="1" class="w-full">
-          </div>
-          <div>
-            <label class="text-gray-400 text-xs mb-1 block">Leverage (1-${maxLev}x)</label>
-            <input type="number" id="futures-leverage" value="5" min="1" max="${maxLev}" class="w-full">
-          </div>
-        </div>
-        <div class="flex items-center gap-2 text-sm">
-          <input type="checkbox" id="futures-paper" class="rounded">
-          <label for="futures-paper" class="text-gray-400">Paper trade (no real funds)</label>
-        </div>
-        <div id="futures-margin-info" class="text-xs text-gray-400"></div>
-        <button onclick="openFuturesPosition('${escHtml(symbol)}')" class="btn btn-primary w-full py-3 text-base">Open Long Position</button>
-        <button onclick="navigate('/futures-portfolio')" class="btn btn-secondary w-full text-sm">View My Portfolio</button>
-      </div>
-    </div>`;
-
-  drawCandleChart(candles, document.getElementById('futures-canvas'));
-
-  const sizeEl = document.getElementById('futures-size');
-  const levEl = document.getElementById('futures-leverage');
-  const infoEl = document.getElementById('futures-margin-info');
-  function updateMarginInfo() {
-    const size = parseFloat(sizeEl.value) || 0;
-    const lev = parseFloat(levEl.value) || 1;
-    const margin = size / lev;
-    const liqDist = (1 / lev) * 0.9 * 100;
-    infoEl.textContent = `Margin: $${margin.toFixed(2)} | Liq ~${liqDist.toFixed(1)}% from entry`;
-  }
-  [sizeEl, levEl].forEach(el => el && el.addEventListener('input', updateMarginInfo));
-  updateMarginInfo();
+  loadPositions();
 }
 
-let _currentSide = 'long';
-window.setSide = function(side) {
-  _currentSide = side;
-  const btn = document.querySelector('#futures-canvas')?.closest('.page-content');
-  document.getElementById('side-long')?.classList.toggle('opacity-100', side === 'long');
-  document.getElementById('side-long')?.classList.toggle('opacity-50', side !== 'long');
-  document.getElementById('side-short')?.classList.toggle('opacity-100', side === 'short');
-  document.getElementById('side-short')?.classList.toggle('opacity-50', side === 'long');
-  const openBtn = document.querySelector('#futures-canvas + div .btn-primary, .page-content .btn-primary:last-of-type');
-  const label = side === 'long' ? 'Open Long Position' : 'Open Short Position';
-  document.querySelectorAll('[onclick*="openFuturesPosition"]').forEach(b => b.textContent = label);
-};
-
-window.openFuturesPosition = async function(symbol) {
-  const size = parseFloat(document.getElementById('futures-size')?.value);
-  const leverage = parseFloat(document.getElementById('futures-leverage')?.value);
-  const isPaper = document.getElementById('futures-paper')?.checked || false;
-  if (!size || size <= 0) return toast('Enter position size', 'error');
-  if (!leverage || leverage < 1) return toast('Enter leverage', 'error');
-  try {
-    const data = await api('POST', '/futures/order', { symbol, side: _currentSide, size, leverage, is_paper_trade: isPaper });
-    toast(`${isPaper ? '[Paper] ' : ''}Opened ${_currentSide} ${symbol} @${fmtNum(data.position.entry_price)} with ${leverage}x`, 'success');
-  } catch (e) {
-    toast(e.message, 'error');
-  }
-};
-
-// ── Canvas OHLC Chart ─────────────────────────────────────────────────────────
-function drawCandleChart(candles, canvas) {
+// ── OHLC canvas chart ──────────────────────────────────────────────────────────
+function drawOHLC(canvas, candles) {
   if (!canvas || !candles.length) return;
-  const dpr = window.devicePixelRatio || 1;
-  const W = canvas.offsetWidth || canvas.parentElement.offsetWidth || 360;
-  const H = 220;
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
-  canvas.style.width = W + 'px';
-  canvas.style.height = H + 'px';
+  canvas.width = canvas.offsetWidth || window.innerWidth;
   const ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
+  const W = canvas.width, H = canvas.height;
+  const pad = { top: 20, right: 20, bottom: 30, left: 56 };
+  const cW = W - pad.left - pad.right;
+  const cH = H - pad.top - pad.bottom;
 
-  const pad = { top: 10, bottom: 30, left: 10, right: 50 };
-  const chartW = W - pad.left - pad.right;
-  const chartH = H - pad.top - pad.bottom;
+  const highs = candles.map(c => parseFloat(c.high));
+  const lows  = candles.map(c => parseFloat(c.low));
+  const maxP = Math.max(...highs), minP = Math.min(...lows);
+  const range = maxP - minP || 1;
+  const toY = p => pad.top + cH - ((p - minP) / range) * cH;
+  const barW = Math.max(1, Math.floor(cW / candles.length) - 1);
 
-  const data = candles.slice(-80);
-  const highs = data.map(c => parseFloat(c.high));
-  const lows = data.map(c => parseFloat(c.low));
-  const minP = Math.min(...lows) * 0.9995;
-  const maxP = Math.max(...highs) * 1.0005;
-  const range = maxP - minP;
-
-  function toY(price) { return pad.top + chartH - ((price - minP) / range) * chartH; }
-  function toX(i) { return pad.left + (i / (data.length - 1)) * chartW; }
-
-  ctx.fillStyle = '#111827';
+  ctx.fillStyle = '#1a1a1a';
   ctx.fillRect(0, 0, W, H);
 
-  // Grid lines
-  ctx.strokeStyle = '#1f2937';
+  ctx.strokeStyle = '#2a2a2a';
   ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
-    const y = pad.top + (i / 4) * chartH;
+    const y = pad.top + (cH * i / 4);
     ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
-    const price = maxP - (i / 4) * range;
-    ctx.fillStyle = '#6b7280'; ctx.font = '9px monospace'; ctx.textAlign = 'left';
-    ctx.fillText('$' + fmtNum(price), W - pad.right + 3, y + 3);
+    const price = maxP - (range * i / 4);
+    ctx.fillStyle = '#6b7280'; ctx.font = '10px system-ui'; ctx.textAlign = 'right';
+    ctx.fillText('$' + price.toFixed(0), pad.left - 4, y + 3);
   }
 
-  // Candles
-  const candleW = Math.max(2, (chartW / data.length) * 0.6);
-  data.forEach((c, i) => {
-    const x = toX(i);
-    const open = parseFloat(c.open), close = parseFloat(c.close);
-    const high = parseFloat(c.high), low = parseFloat(c.low);
-    const isGreen = close >= open;
-    ctx.strokeStyle = isGreen ? '#22c55e' : '#ef4444';
-    ctx.fillStyle = isGreen ? '#22c55e' : '#ef4444';
-
-    // Wick
+  candles.forEach((c, i) => {
+    const x = pad.left + ((i + 0.5) / candles.length) * cW;
+    const o = parseFloat(c.open), cl = parseFloat(c.close);
+    const hi = parseFloat(c.high), lo = parseFloat(c.low);
+    const bull = cl >= o;
+    ctx.strokeStyle = ctx.fillStyle = bull ? '#22c55e' : '#ef4444';
     ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(x, toY(high));
-    ctx.lineTo(x, toY(low));
-    ctx.stroke();
-
-    // Body
-    const bodyTop = toY(Math.max(open, close));
-    const bodyBot = toY(Math.min(open, close));
-    const bodyH = Math.max(1, bodyBot - bodyTop);
-    ctx.fillRect(x - candleW / 2, bodyTop, candleW, bodyH);
+    ctx.beginPath(); ctx.moveTo(x, toY(hi)); ctx.lineTo(x, toY(lo)); ctx.stroke();
+    const top = toY(Math.max(o, cl)), bh = Math.max(1, Math.abs(toY(o) - toY(cl)));
+    ctx.fillRect(x - barW/2, top, barW, bh);
   });
-
-  // Last price line
-  if (data.length) {
-    const lastClose = parseFloat(data[data.length - 1].close);
-    ctx.strokeStyle = '#a78bfa'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(pad.left, toY(lastClose));
-    ctx.lineTo(W - pad.right, toY(lastClose));
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
 }
 
-// ── Futures Portfolio ─────────────────────────────────────────────────────────
-async function renderFuturesPortfolio(container) {
-  container.innerHTML = `<div class="p-4">${skeletonCard(100).repeat(3)}</div>`;
-
-  let data = {};
-  try {
-    data = await api('GET', '/futures/portfolio');
-  } catch (e) {
-    container.innerHTML = `<div class="p-4 text-center text-gray-400">Failed to load: ${escHtml(e.message)}</div>`;
-    return;
-  }
-
-  const { open_positions = [], closed_positions = [], stats = {} } = data;
-
-  container.innerHTML = `
-    <div class="futures-portfolio p-4 space-y-4">
-      <div class="flex items-center gap-2 mb-2">
-        <button onclick="navigate('/futures')" class="text-gray-400 text-lg">←</button>
-        <h1 class="text-xl font-bold">My Portfolio</h1>
+// ── Futures portfolio ──────────────────────────────────────────────────────────
+async function renderFuturesPortfolio() {
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="page-header">
+        <button class="btn btn-sm btn-secondary" onclick="navigate('/futures')">← Back</button>
+        <h2>Portfolio</h2>
       </div>
-
-      <div class="grid grid-cols-2 gap-3">
-        <div class="card text-center">
-          <div class="text-gray-400 text-xs mb-1">Total P&L</div>
-          <div class="text-xl font-bold ${parseFloat(stats.total_pnl||0) >= 0 ? 'pnl-positive' : 'pnl-negative'}">
-            $${fmtNum(stats.total_pnl || 0)}
-          </div>
-        </div>
-        <div class="card text-center">
-          <div class="text-gray-400 text-xs mb-1">Win Rate</div>
-          <div class="text-xl font-bold">
-            ${stats.total_trades > 0 ? ((stats.winning_trades / stats.total_trades) * 100).toFixed(0) : '—'}%
-          </div>
-        </div>
-        <div class="card text-center">
-          <div class="text-gray-400 text-xs mb-1">Total Trades</div>
-          <div class="text-xl font-bold">${stats.total_trades || 0}</div>
-        </div>
-        <div class="card text-center">
-          <div class="text-gray-400 text-xs mb-1">Margin Used</div>
-          <div class="text-xl font-bold">$${fmtNum(stats.total_margin_used || 0)}</div>
-        </div>
+      <div class="futures-portfolio">
+        ${skel(100,'auto','')}
+        <div style="margin:12px">${skel(80,'100%','8px')}${skel(80,'100%','8px')}</div>
       </div>
+    </div>
+    ${bottomNav('futures')}`;
 
-      <div>
-        <h2 class="font-bold mb-2">Open Positions (${open_positions.length})</h2>
-        ${open_positions.length === 0 ? '<div class="card text-center text-gray-400 py-4">No open positions</div>' : ''}
-        ${open_positions.map(p => `
-          <div class="card mb-2">
-            <div class="flex items-start justify-between mb-2">
-              <div>
-                <span class="font-bold">${escHtml(p.market_symbol)}</span>
-                <span class="ml-2 text-xs px-2 py-0.5 rounded ${p.side === 'long' ? 'bg-green-900 text-green-400' : 'bg-red-900 text-red-400'}">${p.side.toUpperCase()} ${p.leverage}x</span>
-                ${p.is_paper_trade ? '<span class="ml-1 text-xs text-gray-400">[Paper]</span>' : ''}
-              </div>
-              <button onclick="closePosition(${p.id})" class="text-xs btn btn-red">Close</button>
-            </div>
-            <div class="grid grid-cols-3 gap-2 text-xs">
-              <div><div class="text-gray-400">Entry</div><div>$${fmtNum(p.entry_price)}</div></div>
-              <div><div class="text-gray-400">Mark</div><div>$${fmtNum(p.mark_price)}</div></div>
-              <div><div class="text-gray-400">Liq</div><div class="text-red-400">$${fmtNum(p.liquidation_price)}</div></div>
-              <div><div class="text-gray-400">Size</div><div>${p.size}</div></div>
-              <div><div class="text-gray-400">Margin</div><div>$${fmtNum(p.margin)}</div></div>
-              <div><div class="text-gray-400">uPnL</div><div class="${parseFloat(p.unrealized_pnl) >= 0 ? 'pnl-positive' : 'pnl-negative'}">$${fmtNum(p.unrealized_pnl)}</div></div>
-            </div>
-          </div>`).join('')}
-      </div>
+  let positions = [];
+  try { const d = await api('GET', '/futures/positions'); positions = d.positions || []; } catch {}
 
-      <div>
-        <h2 class="font-bold mb-2">Recent Closed</h2>
-        ${closed_positions.length === 0 ? '<div class="card text-center text-gray-400 py-4">No closed positions</div>' : ''}
-        ${closed_positions.slice(0, 10).map(p => `
-          <div class="card mb-2 flex justify-between items-center">
-            <div>
-              <span class="font-bold text-sm">${escHtml(p.market_symbol)}</span>
-              <span class="ml-2 text-xs text-gray-400">${p.side} ${p.leverage}x</span>
-              ${p.is_paper_trade ? '<span class="ml-1 text-xs text-gray-500">[Paper]</span>' : ''}
-            </div>
-            <div class="text-right">
-              <div class="${parseFloat(p.realized_pnl) >= 0 ? 'pnl-positive' : 'pnl-negative'} font-semibold">
-                $${fmtNum(p.realized_pnl)}
-              </div>
-              <div class="text-gray-400 text-xs">${p.status}</div>
-            </div>
-          </div>`).join('')}
+  const open = positions.filter(p => p.status === 'open');
+  const closed = positions.filter(p => p.status !== 'open');
+  const totalPnl = open.reduce((s, p) => s + parseFloat(p.unrealized_pnl || 0), 0);
+
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="page-header">
+        <button class="btn btn-sm btn-secondary" onclick="navigate('/futures')">← Back</button>
+        <h2>Portfolio</h2>
       </div>
-    </div>`;
+      <div class="futures-portfolio">
+        <div class="card" style="margin:12px;text-align:center">
+          <div class="stat-label">Unrealized PnL</div>
+          <div style="font-size:28px;font-weight:800" class="${totalPnl>=0?'pnl-pos':'pnl-neg'}">${totalPnl>=0?'+':''}$${fmt(totalPnl)}</div>
+          <div class="stat-label">${open.length} open position${open.length!==1?'s':''}</div>
+        </div>
+        ${open.length ? `<div class="section-title">Open Positions</div>` + open.map(p => `
+          <div class="card" style="margin:0 12px 8px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+              <span><strong>${esc(p.symbol)}</strong> <span class="${p.direction==='long'?'price-up':'price-down'}">${p.direction.toUpperCase()}</span> <span class="leverage-badge">${p.leverage}×</span></span>
+              <span class="${parseFloat(p.unrealized_pnl)>=0?'pnl-pos':'pnl-neg'}">${parseFloat(p.unrealized_pnl)>=0?'+':''}$${fmt(p.unrealized_pnl)}</span>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted)">Entry $${fmt(p.entry_price)} · Mark $${fmt(p.mark_price)} · Margin $${fmt(p.margin)}</div>
+            <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="navigate('/futures/${esc(p.symbol)}')">Manage →</button>
+          </div>`).join('') : '<div class="empty-state">No open positions</div>'}
+        ${closed.length ? `<div class="section-title">History</div>` + closed.slice(0,10).map(p => `
+          <div class="stat-row" style="padding:10px 16px;border-bottom:1px solid var(--border)">
+            <div><strong>${esc(p.symbol)}</strong> <span class="stat-label">${p.direction} ${p.leverage}×</span></div>
+            <div style="text-align:right">
+              <div class="${parseFloat(p.realized_pnl||0)>=0?'pnl-pos':'pnl-neg'}">${parseFloat(p.realized_pnl||0)>=0?'+':''}$${fmt(p.realized_pnl)}</div>
+              <div class="stat-label">${p.status}</div>
+            </div>
+          </div>`).join('') : ''}
+      </div>
+    </div>
+    ${bottomNav('futures')}`;
 }
 
-window.closePosition = async function(posId) {
-  if (!confirm('Close this position?')) return;
-  try {
-    const d = await api('POST', `/futures/close/${posId}`, {});
-    const pnl = parseFloat(d.pnl);
-    toast(`Closed! P&L: ${pnl >= 0 ? '+' : ''}$${fmtNum(pnl)}`, pnl >= 0 ? 'success' : 'error');
-    renderFuturesPortfolio(document.querySelector('.page-content'));
-  } catch (e) {
-    toast(e.message, 'error');
-  }
-};
-
-// ── Earn ──────────────────────────────────────────────────────────────────────
-async function renderEarn(container) {
-  container.innerHTML = `<div class="p-4">${skeletonCard(80).repeat(4)}</div>`;
-
-  let stakingPools = [], userPositions = [], lpPools = [], icos = [];
-  try {
-    const [sd, lpd, icosd] = await Promise.all([
-      api('GET', '/staking'),
-      api('GET', '/lp'),
-      api('GET', '/icos'),
-    ]);
-    stakingPools = sd.pools || [];
-    userPositions = sd.positions || [];
-    lpPools = lpd.pools || [];
-    icos = icosd.icos || [];
-  } catch (e) {
-    container.innerHTML = `<div class="p-4 text-center text-gray-400">Failed to load: ${escHtml(e.message)}</div>`;
-    return;
-  }
-
-  let earnTab = 'stake';
-
-  function renderEarnContent() {
-    const inner = document.getElementById('earn-inner');
-    if (!inner) return;
-    if (earnTab === 'stake') {
-      inner.innerHTML = `
-        <div class="space-y-3">
-          ${userPositions.filter(p => p.status === 'active').length > 0 ? `
-            <h3 class="font-semibold text-gray-300 text-sm">My Active Stakes</h3>
-            ${userPositions.filter(p => p.status === 'active').map(pos => `
-              <div class="card">
-                <div class="flex justify-between items-start mb-2">
-                  <div><div class="font-semibold">${escHtml(pos.pool_name)}</div>
-                  <div class="text-xs text-gray-400">${parseFloat(pos.apy).toFixed(1)}% APY</div></div>
-                  <button onclick="unstakePosition(${pos.id})" class="text-xs btn btn-secondary">Unstake</button>
-                </div>
-                <div class="text-xs text-gray-400">Staked: <span class="text-white">${fmtNum(pos.amount_staked)}</span></div>
-              </div>`).join('')}
-          ` : ''}
-          <h3 class="font-semibold text-gray-300 text-sm mt-2">Staking Pools</h3>
-          ${stakingPools.map(p => `
-            <div class="card">
-              <div class="flex justify-between items-start mb-2">
-                <div>
-                  <div class="font-semibold">${escHtml(p.name)}</div>
-                  <div class="text-xs text-gray-400">${escHtml(p.token_symbol)} &bull; TVL: $${fmtNum(p.total_staked)}</div>
-                </div>
-                <div class="text-right">
-                  <div class="text-green-400 font-bold">${parseFloat(p.apy).toFixed(1)}%</div>
-                  <div class="text-xs text-gray-400">APY</div>
-                </div>
-              </div>
-              <div class="flex gap-2 mt-2">
-                <input type="number" id="stake-amt-${p.id}" placeholder="Amount" class="flex-1">
-                <button onclick="stakeInPool(${p.id})" class="btn btn-primary text-sm">Stake</button>
-              </div>
-            </div>`).join('')}
-        </div>`;
-    } else if (earnTab === 'lp') {
-      inner.innerHTML = `
-        <div class="space-y-3">
-          ${lpPools.map(p => `
-            <div class="card">
-              <div class="flex justify-between items-start mb-2">
-                <div>
-                  <div class="font-semibold">${escHtml(p.name)}</div>
-                  <div class="text-xs text-gray-400">TVL: $${fmtNum(p.tvl)} &bull; Fee: ${p.fee_rate}%</div>
-                </div>
-                <div class="text-right">
-                  <div class="text-green-400 font-bold">${parseFloat(p.apy || 0).toFixed(1)}%</div>
-                  <div class="text-xs text-gray-400">APY</div>
-                </div>
-              </div>
-              <button onclick="addLiquidity(${p.id})" class="btn btn-primary text-sm w-full">Add Liquidity</button>
-            </div>`).join('')}
-        </div>`;
-    } else if (earnTab === 'icos') {
-      inner.innerHTML = `
-        <div class="space-y-3">
-          ${icos.map(ico => `
-            <div class="card">
-              <div class="flex justify-between items-start mb-2">
-                <div>
-                  <div class="font-semibold">${escHtml(ico.name)} <span class="text-xs text-gray-400">(${escHtml(ico.symbol)})</span></div>
-                  <div class="text-xs text-gray-400">${escHtml(ico.description || '').slice(0, 80)}</div>
-                </div>
-                <span class="text-xs px-2 py-0.5 rounded ${ico.status === 'active' ? 'bg-green-900 text-green-400' : 'bg-gray-800 text-gray-400'}">${ico.status}</span>
-              </div>
-              <div class="flex justify-between text-xs text-gray-400 mb-2">
-                <span>Price: $${fmtNum(ico.token_price, 4)}</span>
-                <span>Raised: $${fmtNum(ico.amount_raised)} / $${fmtNum(ico.hard_cap)}</span>
-              </div>
-              <div class="w-full bg-gray-800 rounded-full h-1.5 mb-2">
-                <div class="bg-purple-500 h-1.5 rounded-full" style="width:${Math.min(100, (ico.amount_raised/ico.hard_cap)*100).toFixed(0)}%"></div>
-              </div>
-              ${ico.status === 'active' ? `
-                <div class="flex gap-2 mt-2">
-                  <input type="number" id="ico-amt-${ico.id}" placeholder="Amount (USDC)" class="flex-1">
-                  <button onclick="buyICO(${ico.id})" class="btn btn-primary text-sm">Buy</button>
-                </div>` : ''}
-            </div>`).join('')}
-        </div>`;
-    }
-  }
-
-  container.innerHTML = `
-    <div class="earn-section">
-      ${pageHeader('Earn', 'Stake, LP & participate in ICOs')}
-      <div class="px-4">
-        <div class="tab-pills">
-          <button class="tab-pill active" onclick="setEarnTab('stake',this)">Staking</button>
-          <button class="tab-pill" onclick="setEarnTab('lp',this)">Liquidity</button>
-          <button class="tab-pill" onclick="setEarnTab('icos',this)">ICOs</button>
+// ── Earn ───────────────────────────────────────────────────────────────────────
+async function renderEarn() {
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="page-header"><h2>Earn</h2></div>
+      <div class="earn-section">
+        <div class="tab-pills" style="margin-bottom:12px">
+          <button class="tab-pill active">Staking</button>
+          <button class="tab-pill">LP</button>
+          <button class="tab-pill">ICO</button>
+          <button class="tab-pill">Stocks</button>
         </div>
-        <div id="earn-inner"></div>
+        ${skel(80,'100%','8px')}${skel(80,'100%','8px')}${skel(80,'100%','8px')}
       </div>
-    </div>`;
+    </div>
+    ${bottomNav('earn')}`;
 
-  window.setEarnTab = (tab, btn) => {
-    earnTab = tab;
-    document.querySelectorAll('.tab-pill').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    renderEarnContent();
+  const TABS = ['staking','lp','ico','stocks'];
+
+  const pills = (active) => `<div class="tab-pills" style="margin-bottom:12px">
+    ${TABS.map(t => `<button class="tab-pill${t===active?' active':''}" onclick="loadEarnTab('${t}')">${t.toUpperCase()}</button>`).join('')}
+  </div>`;
+
+  const sec = () => APP.querySelector('.earn-section');
+
+  window.loadEarnTab = async (tab) => {
+    const el = sec();
+    if (!el) return;
+    el.innerHTML = pills(tab) + skel(80,'100%','8px');
+    try {
+      if (tab === 'staking') {
+        const d = await api('GET', '/staking/pools');
+        el.innerHTML = pills(tab) + ((d.pools||[]).map(p => `
+          <div class="pool-card">
+            <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+              <strong>${esc(p.name)}</strong> <span class="apy-badge">${fmt(p.apy_rate*100)}% APY</span>
+            </div>
+            <div class="stat-label" style="margin-bottom:8px">Min stake: ${fmt(p.min_stake)} VEYA · Lock: ${p.lock_days||0}d</div>
+            <div style="display:flex;gap:8px">
+              <input type="number" id="s-${esc(p.id)}" placeholder="Amount" min="${p.min_stake}" style="flex:1">
+              <button class="btn btn-primary btn-sm" onclick="doStake('${esc(p.id)}')">Stake</button>
+            </div>
+          </div>`).join('') || '<div class="empty-state">No staking pools</div>');
+      } else if (tab === 'lp') {
+        const d = await api('GET', '/lp/pools');
+        el.innerHTML = pills(tab) + ((d.pools||[]).map(p => `
+          <div class="pool-card">
+            <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+              <strong>${esc(p.token_a)}/${esc(p.token_b)}</strong> <span class="apy-badge">${fmt(p.fee_rate*100)}% fee</span>
+            </div>
+            <div class="stat-label" style="margin-bottom:8px">TVL $${fmt(p.tvl)}</div>
+            <div style="display:flex;gap:8px">
+              <input type="number" id="la-${esc(p.id)}" placeholder="${esc(p.token_a)}" style="flex:1">
+              <input type="number" id="lb-${esc(p.id)}" placeholder="${esc(p.token_b)}" style="flex:1">
+              <button class="btn btn-primary btn-sm" onclick="doLP('${esc(p.id)}','${esc(p.token_a)}','${esc(p.token_b)}')">Add</button>
+            </div>
+          </div>`).join('') || '<div class="empty-state">No LP pools</div>');
+      } else if (tab === 'ico') {
+        const d = await api('GET', '/ico');
+        el.innerHTML = pills(tab) + ((d.icos||[]).map(ico => `
+          <div class="pool-card">
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+              <strong>${esc(ico.name)}</strong> <span class="${ico.status==='active'?'price-up':'stat-label'}">${esc(ico.status)}</span>
+            </div>
+            <div class="stat-label" style="margin-bottom:6px">Price: $${fmt(ico.token_price)} · Raised: $${fmt(ico.raised)}/$${fmt(ico.hard_cap)}</div>
+            ${ico.status==='active' ? `<div style="display:flex;gap:8px">
+              <input type="number" id="ico-${esc(ico.id)}" placeholder="Amount" style="flex:1">
+              <button class="btn btn-primary btn-sm" onclick="doICO('${esc(ico.id)}')">Participate</button>
+            </div>` : ''}
+          </div>`).join('') || '<div class="empty-state">No active ICOs</div>');
+      } else {
+        const d = await api('GET', '/stocks');
+        el.innerHTML = pills(tab) + ((d.stocks||[]).map(s => `
+          <div class="pool-card">
+            <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+              <div><strong>${esc(s.symbol)}</strong> <span class="stat-label">${esc(s.name)}</span></div>
+              <div><span style="font-weight:600">$${fmt(s.price)}</span> ${pct(s.change_pct)}</div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <input type="number" id="st-${esc(s.symbol)}" placeholder="Shares" style="flex:1" min="1">
+              <button class="btn btn-green btn-sm" onclick="doStock('${esc(s.symbol)}','buy')">Buy</button>
+              <button class="btn btn-red btn-sm" onclick="doStock('${esc(s.symbol)}','sell')">Sell</button>
+            </div>
+          </div>`).join('') || '<div class="empty-state">No stocks available</div>');
+      }
+    } catch (e) { const el2 = sec(); if (el2) el2.innerHTML = pills(tab) + `<div class="empty-state">${esc(e.message)}</div>`; }
   };
-  renderEarnContent();
+
+  window.doStake = async (poolId) => {
+    const amt = parseFloat(document.getElementById(`s-${poolId}`)?.value);
+    if (!amt) return toast('Enter amount','error');
+    try { await api('POST','/staking/stake',{pool_id:poolId,amount:amt}); toast('Staked!','success'); window.loadEarnTab('staking'); }
+    catch(e) { toast(e.message,'error'); }
+  };
+  window.doLP = async (id, tokenA, tokenB) => {
+    const a=parseFloat(document.getElementById(`la-${id}`)?.value), b=parseFloat(document.getElementById(`lb-${id}`)?.value);
+    if (!a||!b) return toast('Enter amounts','error');
+    try { await api('POST','/lp/add',{pool_id:id,amount_a:a,amount_b:b}); toast('Liquidity added!','success'); window.loadEarnTab('lp'); }
+    catch(e) { toast(e.message,'error'); }
+  };
+  window.doICO = async (id) => {
+    const amt=parseFloat(document.getElementById(`ico-${id}`)?.value);
+    if (!amt) return toast('Enter amount','error');
+    try { await api('POST',`/ico/${id}/participate`,{amount:amt}); toast('Participated!','success'); window.loadEarnTab('ico'); }
+    catch(e) { toast(e.message,'error'); }
+  };
+  window.doStock = async (sym, side) => {
+    const shares=parseInt(document.getElementById(`st-${sym}`)?.value);
+    if (!shares) return toast('Enter shares','error');
+    try { await api('POST','/stocks/trade',{symbol:sym,side,shares}); toast(`${side} filled!`,'success'); window.loadEarnTab('stocks'); }
+    catch(e) { toast(e.message,'error'); }
+  };
+
+  window.loadEarnTab('staking');
 }
 
-window.stakeInPool = async function(poolId) {
-  const amt = parseFloat(document.getElementById(`stake-amt-${poolId}`)?.value);
-  if (!amt || amt <= 0) return toast('Enter amount', 'error');
-  try {
-    await api('POST', '/staking/stake', { pool_id: poolId, amount: amt });
-    toast(`Staked ${amt} successfully!`, 'success');
-    renderEarn(document.querySelector('.page-content'));
-  } catch (e) { toast(e.message, 'error'); }
-};
-
-window.unstakePosition = async function(posId) {
-  if (!confirm('Unstake this position?')) return;
-  try {
-    const d = await api('POST', `/staking/unstake/${posId}`, {});
-    toast(`Unstaked! Rewards: ${fmtNum(d.rewards)}`, 'success');
-    renderEarn(document.querySelector('.page-content'));
-  } catch (e) { toast(e.message, 'error'); }
-};
-
-window.buyICO = async function(icoId) {
-  const amt = parseFloat(document.getElementById(`ico-amt-${icoId}`)?.value);
-  if (!amt || amt <= 0) return toast('Enter amount', 'error');
-  try {
-    const d = await api('POST', `/icos/${icoId}/buy`, { amount: amt });
-    toast(`Bought ${fmtNum(d.tokens_received)} tokens!`, 'success');
-  } catch (e) { toast(e.message, 'error'); }
-};
-
-window.addLiquidity = function(poolId) {
-  toast('LP functionality coming soon', 'info');
-};
-
-// ── Prediction Markets ────────────────────────────────────────────────────────
-async function renderMarkets(container) {
-  container.innerHTML = `<div class="p-4">${skeletonCard(100).repeat(4)}</div>`;
+// ── Predict markets ────────────────────────────────────────────────────────────
+async function renderMarkets() {
+  const skelCards = Array.from({length:4}, () => `
+    <div class="market-card">
+      ${skel(18,'70%','8px')}
+      <div class="prob-bar"><div class="prob-bar-yes" style="width:50%"></div></div>
+      <div style="display:flex;justify-content:space-between">${skel(12,'40%','0')}${skel(12,'30%','0')}</div>
+    </div>`).join('');
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="page-header"><h2>Predict</h2></div>
+      <div style="padding:12px">${skelCards}</div>
+    </div>
+    ${bottomNav('markets')}`;
 
   let markets = [];
-  try {
-    const d = await api('GET', '/markets');
-    markets = d.markets || [];
-  } catch (e) {
-    container.innerHTML = `<div class="p-4 text-center text-gray-400">Failed to load: ${escHtml(e.message)}</div>`;
-    return;
-  }
+  try { const d = await api('GET', '/markets'); markets = d.markets || []; } catch {}
 
-  container.innerHTML = `
-    <div class="p-4">
-      ${pageHeader('Predict', 'Prediction Markets', `<button onclick="showCreateMarket()" class="btn btn-primary text-sm">+ New</button>`)}
-      <div id="create-market-form" class="hidden card mb-4">
-        <h3 class="font-bold mb-3">Create Market</h3>
-        <div class="space-y-3">
-          <div><label class="text-gray-400 text-xs mb-1 block">Question</label><input type="text" id="mkt-question" placeholder="Will BTC reach $100k by end of year?" class="w-full"></div>
-          <div><label class="text-gray-400 text-xs mb-1 block">Closes At</label><input type="date" id="mkt-closes" class="w-full"></div>
-          <button onclick="createMarket()" class="btn btn-primary w-full">Create</button>
-          <button onclick="hideCreateMarket()" class="btn btn-secondary w-full text-sm">Cancel</button>
-        </div>
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="page-header"><h2>Predict</h2></div>
+      <div style="padding:12px">
+        ${markets.length ? markets.map(m => {
+          const yesProb = m.yes_probability ? parseFloat(m.yes_probability)*100 : 50;
+          return `
+            <div class="market-card">
+              <div style="font-weight:600;margin-bottom:6px">${esc(m.question)}</div>
+              <div class="prob-bar"><div class="prob-bar-yes" style="width:${yesProb.toFixed(0)}%"></div></div>
+              <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-top:4px">
+                <span>YES ${yesProb.toFixed(0)}%</span><span>Vol $${fmt(m.total_volume)} · ${esc(m.status)}</span>
+              </div>
+              ${m.status==='open'?`<div style="display:flex;gap:8px;margin-top:10px">
+                <button class="btn btn-green btn-sm" style="flex:1" onclick="tradePredictYes('${m.id}')">YES</button>
+                <button class="btn btn-red btn-sm" style="flex:1" onclick="tradePredictNo('${m.id}')">NO</button>
+              </div>`:''}
+            </div>`;
+        }).join('') : '<div class="empty-state">No prediction markets</div>'}
       </div>
-      <div class="space-y-3">
-        ${markets.map(m => `
-          <div class="market-card" onclick="navigate('/market/${m.id}')">
-            <div class="flex items-start justify-between mb-2">
-              <div class="flex-1 pr-2">
-                <div class="font-semibold text-sm leading-tight">${escHtml(String(m.question || '').slice(0, 120))}</div>
-                <div class="text-gray-400 text-xs mt-1">by ${escHtml(m.creator_username || 'anonymous')}</div>
-              </div>
-              <span class="text-xs px-2 py-0.5 rounded ${m.status === 'open' ? 'bg-green-900 text-green-400' : 'bg-gray-800 text-gray-400'}">${m.status}</span>
-            </div>
-            <div class="flex gap-4 text-xs">
-              <div class="flex-1">
-                <div class="flex justify-between mb-1"><span class="text-green-400">YES ${parseFloat(m.yes_price * 100 || 50).toFixed(0)}%</span><span class="text-red-400">NO ${parseFloat(m.no_price * 100 || 50).toFixed(0)}%</span></div>
-                <div class="w-full bg-gray-800 rounded-full h-2">
-                  <div class="bg-gradient-to-r from-green-500 to-red-500 h-2 rounded-full" style="background: linear-gradient(90deg, #22c55e ${parseFloat(m.yes_price * 100 || 50).toFixed(0)}%, #ef4444 ${parseFloat(m.yes_price * 100 || 50).toFixed(0)}%)"></div>
-                </div>
-              </div>
-              <div class="text-right">
-                <div class="text-gray-400">Vol: $${fmtNum(m.liquidity || 0)}</div>
-                <div class="text-gray-500">Closes ${new Date(m.closes_at).toLocaleDateString()}</div>
-              </div>
-            </div>
-          </div>`).join('')}
-        ${markets.length === 0 ? '<div class="card text-center text-gray-400 py-6">No prediction markets yet</div>' : ''}
-      </div>
-    </div>`;
+    </div>
+    ${bottomNav('markets')}`;
+
+  window.tradePredictYes = async (id) => {
+    try { await api('POST',`/markets/${id}/trade`,{side:'YES',shares:10}); toast('Bought YES shares','success'); }
+    catch(e) { toast(e.message,'error'); }
+  };
+  window.tradePredictNo = async (id) => {
+    try { await api('POST',`/markets/${id}/trade`,{side:'NO',shares:10}); toast('Bought NO shares','success'); }
+    catch(e) { toast(e.message,'error'); }
+  };
 }
 
-window.showCreateMarket = () => document.getElementById('create-market-form')?.classList.remove('hidden');
-window.hideCreateMarket = () => document.getElementById('create-market-form')?.classList.add('hidden');
-window.createMarket = async function() {
-  const q = document.getElementById('mkt-question')?.value?.trim();
-  const closes = document.getElementById('mkt-closes')?.value;
-  if (!q || !closes) return toast('Fill in all fields', 'error');
-  try {
-    await api('POST', '/markets', { question: q, closes_at: closes + 'T23:59:59Z' });
-    toast('Market created!', 'success');
-    navigate('/markets');
-  } catch (e) { toast(e.message, 'error'); }
-};
-
-// ── Market Detail ─────────────────────────────────────────────────────────────
-async function renderMarketDetail(container, id) {
-  container.innerHTML = `<div class="p-4">${skeletonCard(200)}${skeletonCard(100)}</div>`;
-
-  let data = {};
-  try {
-    data = await api('GET', `/markets/${id}`);
-  } catch (e) {
-    container.innerHTML = `<div class="p-4 text-center text-gray-400">Failed to load: ${escHtml(e.message)}</div>`;
-    return;
-  }
-
-  const { market: m, price_history = [], comments = [], user_position = null } = data;
-  if (!m) return;
-
-  container.innerHTML = `
-    <div class="p-4 space-y-4">
-      <div class="flex items-center gap-2">
-        <button onclick="navigate('/markets')" class="text-gray-400 text-lg">←</button>
-        <h1 class="text-lg font-bold leading-tight">${escHtml(String(m.question || '').slice(0, 200))}</h1>
-      </div>
-      <div class="flex gap-3 text-xs text-gray-400">
-        <span>Status: <span class="${m.status === 'open' ? 'text-green-400' : 'text-gray-300'}">${m.status}</span></span>
-        <span>Liquidity: $${fmtNum(m.liquidity)}</span>
-        <span>Closes: ${new Date(m.closes_at).toLocaleDateString()}</span>
-      </div>
-      ${m.status === 'open' ? `
-        <div class="card">
-          <h3 class="font-bold mb-3">Trade</h3>
-          <div class="flex gap-2 mb-3">
-            <button id="outcome-yes" onclick="setOutcome('yes')" class="btn btn-green flex-1">YES ${parseFloat(m.yes_price * 100 || 50).toFixed(0)}¢</button>
-            <button id="outcome-no" onclick="setOutcome('no')" class="btn btn-red flex-1 opacity-50">NO ${parseFloat(m.no_price * 100 || 50).toFixed(0)}¢</button>
-          </div>
-          <div class="flex gap-2">
-            <input type="number" id="mkt-shares" placeholder="Shares" min="1" class="flex-1">
-            <button onclick="tradeMarket(${m.id})" class="btn btn-primary">Buy</button>
-          </div>
-          ${user_position ? `<div class="mt-2 text-xs text-gray-400">Your position: ${fmtNum(user_position.yes_shares)} YES / ${fmtNum(user_position.no_shares)} NO</div>` : ''}
-        </div>` : m.status === 'resolved' ? `<div class="card text-center py-4"><div class="text-gray-400 text-sm">Resolved: <span class="text-white font-bold">${m.resolved_outcome?.toUpperCase()}</span></div></div>` : ''}
-      <div class="card">
-        <h3 class="font-bold mb-3 text-sm">Discussion</h3>
-        <div class="space-y-2 mb-3">
-          ${comments.map(c => `
-            <div class="border-b border-gray-800 pb-2">
-              <div class="text-xs text-gray-400 mb-0.5">${escHtml(c.username)}</div>
-              <div class="text-sm">${escHtml(c.content)}</div>
-            </div>`).join('')}
-          ${comments.length === 0 ? '<div class="text-gray-400 text-sm">No comments yet</div>' : ''}
-        </div>
-        <div class="flex gap-2">
-          <input type="text" id="mkt-comment" placeholder="Add a comment..." class="flex-1">
-          <button onclick="postMarketComment(${m.id})" class="btn btn-secondary text-sm">Post</button>
-        </div>
-      </div>
-    </div>`;
-}
-
-let _currentOutcome = 'yes';
-window.setOutcome = (o) => {
-  _currentOutcome = o;
-  document.getElementById('outcome-yes')?.classList.toggle('opacity-50', o !== 'yes');
-  document.getElementById('outcome-no')?.classList.toggle('opacity-50', o === 'yes');
-};
-window.tradeMarket = async function(mktId) {
-  const shares = parseFloat(document.getElementById('mkt-shares')?.value);
-  if (!shares || shares <= 0) return toast('Enter shares', 'error');
-  try {
-    await api('POST', `/markets/${mktId}/trade`, { outcome: _currentOutcome, shares });
-    toast(`Bought ${shares} ${_currentOutcome.toUpperCase()} shares!`, 'success');
-  } catch (e) { toast(e.message, 'error'); }
-};
-window.postMarketComment = async function(mktId) {
-  const content = document.getElementById('mkt-comment')?.value?.trim();
-  if (!content) return;
-  try {
-    await api('POST', `/markets/${mktId}/comment`, { content });
-    toast('Comment posted!', 'success');
-    renderMarketDetail(document.querySelector('.page-content'), mktId);
-  } catch (e) { toast(e.message, 'error'); }
-};
-
-// ── Explore (Social) ──────────────────────────────────────────────────────────
-async function renderExplore(container) {
-  container.innerHTML = `<div>${skeletonCard(80).repeat(5)}</div>`;
-
-  let posts = [];
-  try {
-    const d = await api('GET', '/posts');
-    posts = d.posts || [];
-  } catch (e) {
-    container.innerHTML = `<div class="p-4 text-center text-gray-400">Failed to load: ${escHtml(e.message)}</div>`;
-    return;
-  }
-
-  container.innerHTML = `
-    <div>
-      ${pageHeader('Social', 'Explore & discuss', `<button onclick="showNewPost()" class="btn btn-primary text-sm">Post</button>`)}
-      <div id="new-post-form" class="hidden px-4 mb-3">
-        <div class="card">
-          <textarea id="post-content" placeholder="What's happening in crypto?" class="w-full mb-2" rows="3"></textarea>
-          <div class="flex justify-end gap-2">
-            <button onclick="hideNewPost()" class="btn btn-secondary text-sm">Cancel</button>
-            <button onclick="submitPost()" class="btn btn-primary text-sm">Post</button>
-          </div>
-        </div>
-      </div>
-      <div class="tab-pills mx-4 mb-0">
-        <button class="tab-pill active" onclick="loadPosts('global', this)">Global</button>
-        <button class="tab-pill" onclick="loadPosts('following', this)">Following</button>
-      </div>
-      <div id="posts-list">
-        ${renderPostCards(posts)}
-      </div>
-    </div>`;
-}
-
-function renderPostCards(posts) {
-  if (posts.length === 0) return '<div class="text-center text-gray-400 py-8">No posts yet</div>';
-  return posts.map(p => `
-    <div class="post-card" onclick="navigate('/post/${p.id}')">
-      <div class="flex items-start gap-2 mb-2">
-        <div class="w-8 h-8 rounded-full bg-purple-900 flex items-center justify-center text-xs font-bold flex-shrink-0">
-          ${escHtml((p.username || '?').slice(0, 1).toUpperCase())}
-        </div>
-        <div class="flex-1 min-w-0">
-          <div class="font-semibold text-sm">${escHtml(p.username)}</div>
-          <div class="text-gray-400 text-xs">${new Date(p.created_at).toLocaleString()}</div>
-        </div>
-      </div>
-      <div class="text-sm mb-2">${escHtml(p.content)}</div>
-      <div class="flex gap-4 text-gray-500 text-xs">
-        <button onclick="event.stopPropagation(); reactPost(${p.id})" class="hover:text-white">❤️ ${p.reaction_count || 0}</button>
-        <span>💬 ${p.reply_count || 0}</span>
+// ── Explore ────────────────────────────────────────────────────────────────────
+async function renderExplore() {
+  const skelPosts = Array.from({length:4}, () => `
+    <div class="post-card">
+      <div style="display:flex;gap:12px">
+        <div class="skeleton" style="width:36px;height:36px;border-radius:50%;flex-shrink:0"></div>
+        <div style="flex:1">${skel(13,'120px','6px')}${skel(14,'100%','4px')}${skel(14,'80%','0')}</div>
       </div>
     </div>`).join('');
-}
-
-window.showNewPost = () => document.getElementById('new-post-form')?.classList.remove('hidden');
-window.hideNewPost = () => document.getElementById('new-post-form')?.classList.add('hidden');
-window.submitPost = async function() {
-  const content = document.getElementById('post-content')?.value?.trim();
-  if (!content) return toast('Write something!', 'error');
-  try {
-    await api('POST', '/posts', { content });
-    toast('Posted!', 'success');
-    renderExplore(document.querySelector('.page-content'));
-  } catch (e) { toast(e.message, 'error'); }
-};
-window.loadPosts = async function(mode, btn) {
-  document.querySelectorAll('.tab-pill').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  try {
-    const d = await api('GET', `/posts?mode=${mode}`);
-    document.getElementById('posts-list').innerHTML = renderPostCards(d.posts || []);
-  } catch (e) { toast(e.message, 'error'); }
-};
-window.reactPost = async function(postId) {
-  try {
-    await api('POST', `/posts/${postId}/react`, { type: 'like' });
-  } catch (e) { toast(e.message, 'error'); }
-};
-
-// ── Post Detail ───────────────────────────────────────────────────────────────
-async function renderPost(container, id) {
-  container.innerHTML = `<div class="p-4">${skeletonCard(120)}${skeletonCard(80).repeat(3)}</div>`;
-
-  let data = {};
-  try {
-    data = await api('GET', `/posts/${id}`);
-  } catch (e) {
-    container.innerHTML = `<div class="p-4 text-center text-gray-400">Failed to load: ${escHtml(e.message)}</div>`;
-    return;
-  }
-
-  const { post: p, replies = [] } = data;
-  if (!p) return;
-
-  container.innerHTML = `
-    <div>
-      <div class="flex items-center gap-2 p-4">
-        <button onclick="navigate('/explore')" class="text-gray-400 text-lg">←</button>
-        <h1 class="font-bold">Post</h1>
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="page-header"><h2>Explore</h2></div>
+      <div style="padding:12px;border-bottom:1px solid var(--border)">
+        <textarea id="post-text" placeholder="What's happening?" rows="2" style="margin-bottom:8px"></textarea>
+        <button class="btn btn-primary btn-sm" onclick="submitPost()">Post</button>
       </div>
-      <div class="post-card">
-        <div class="flex items-start gap-2 mb-2">
-          <div class="w-9 h-9 rounded-full bg-purple-900 flex items-center justify-center text-sm font-bold flex-shrink-0">
-            ${escHtml((p.username || '?').slice(0,1).toUpperCase())}
+      ${skelPosts}
+    </div>
+    ${bottomNav('explore')}`;
+
+  let posts = [];
+  try { const d = await api('GET', '/posts'); posts = d.posts || []; } catch {}
+
+  const postsHtml = posts.length ? posts.map(p => `
+    <div class="post-card">
+      <div style="display:flex;gap:12px">
+        <div class="post-avatar">${esc((p.username||'?')[0].toUpperCase())}</div>
+        <div class="post-content">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span class="post-username">${esc(p.username)}</span>
+            ${tierBadge(p.verification_tier||0, p.is_admin)}
+            <span class="post-time">${timeAgo(p.created_at)}</span>
           </div>
-          <div>
-            <div class="font-semibold">${escHtml(p.username)}</div>
-            <div class="text-gray-400 text-xs">${new Date(p.created_at).toLocaleString()}</div>
+          <div class="post-text">${esc(p.content)}</div>
+          <div class="post-actions">
+            <button class="post-action" onclick="reactPost('${p.id}','like')">♥ ${p.like_count||0}</button>
+            <button class="post-action" onclick="replyTo('${p.id}')">💬 ${p.reply_count||0}</button>
+            <button class="post-action" onclick="reactPost('${p.id}','boost')">⚡ ${p.boost_count||0}</button>
           </div>
         </div>
-        <div class="text-base mb-3">${escHtml(p.content)}</div>
-        <div class="flex gap-4 text-gray-500 text-sm">
-          <button onclick="reactPost(${p.id})" class="hover:text-white">❤️ ${p.reaction_count || 0}</button>
-          <span>💬 ${p.reply_count || 0}</span>
-        </div>
       </div>
-      <div class="p-4 border-t border-gray-800">
-        <div class="flex gap-2 mb-4">
-          <input type="text" id="reply-input" placeholder="Reply..." class="flex-1">
-          <button onclick="submitReply(${p.id})" class="btn btn-primary text-sm">Reply</button>
-        </div>
-        ${replies.map(r => `
-          <div class="border-b border-gray-800 py-3">
-            <div class="flex items-center gap-2 mb-1">
-              <div class="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center text-xs">${escHtml((r.username||'?').slice(0,1).toUpperCase())}</div>
-              <span class="font-semibold text-sm">${escHtml(r.username)}</span>
-              <span class="text-gray-400 text-xs">${new Date(r.created_at).toLocaleString()}</span>
-            </div>
-            <div class="text-sm ml-8">${escHtml(r.content)}</div>
-          </div>`).join('')}
-        ${replies.length === 0 ? '<div class="text-center text-gray-400 text-sm py-4">No replies yet</div>' : ''}
-      </div>
-    </div>`;
+    </div>`).join('') : '<div class="empty-state">No posts yet — be the first!</div>';
+
+  const pc = APP.querySelector('.page-content');
+  if (pc) pc.innerHTML = `
+    <div class="page-header"><h2>Explore</h2></div>
+    <div style="padding:12px;border-bottom:1px solid var(--border)">
+      <textarea id="post-text" placeholder="What's happening?" rows="2" style="margin-bottom:8px"></textarea>
+      <button class="btn btn-primary btn-sm" onclick="submitPost()">Post</button>
+    </div>
+    ${postsHtml}`;
+
+  window.submitPost = async () => {
+    const content = document.getElementById('post-text')?.value?.trim();
+    if (!content) return toast('Write something first','error');
+    try { await api('POST','/posts',{content}); toast('Posted!','success'); renderExplore(); }
+    catch(e) { toast(e.message,'error'); }
+  };
+  window.reactPost = async (id, type) => {
+    try { await api('POST',`/posts/${id}/react`,{type}); renderExplore(); }
+    catch(e) { toast(e.message,'error'); }
+  };
+  window.replyTo = async (id) => {
+    const content = prompt('Reply:');
+    if (!content) return;
+    try { await api('POST',`/posts/${id}/reply`,{content}); toast('Replied!','success'); renderExplore(); }
+    catch(e) { toast(e.message,'error'); }
+  };
 }
 
-window.submitReply = async function(postId) {
-  const content = document.getElementById('reply-input')?.value?.trim();
-  if (!content) return;
-  try {
-    await api('POST', `/posts/${postId}/reply`, { content });
-    toast('Replied!', 'success');
-    renderPost(document.querySelector('.page-content'), postId);
-  } catch (e) { toast(e.message, 'error'); }
-};
-
-// ── Verify ────────────────────────────────────────────────────────────────────
-async function renderVerify(container) {
-  container.innerHTML = `<div class="p-4">${skeletonCard(120).repeat(2)}</div>`;
-
-  let status = { tier: 0 };
-  try {
-    const d = await api('GET', '/verify/status');
-    status = d;
-  } catch {}
-
-  const tier = status.tier || 0;
-  const tiers = [
-    {
-      level: 0, title: 'Basic — Wallet Connected', icon: '🟤',
-      perks: ['Access to all social features', 'Paper trading', 'Basic market data'],
-      current: tier >= 0,
-    },
-    {
-      level: 1, title: 'Social — Base Verified', icon: '🥈',
-      perks: ['Live futures trading', 'ICO participation', 'LP pools', 'Higher rate limits'],
-      current: tier >= 1,
-      action: tier < 1 ? 'startSocialVerify' : null,
-      actionLabel: 'Verify with Base',
-      available: status.base_verify_available,
-    },
-    {
-      level: 2, title: 'Premium — zkPassport', icon: '🥇',
-      perks: ['All Social perks', 'Premium analytics', 'Higher leverage', 'Exclusive pools'],
-      current: tier >= 2,
-      action: tier < 2 ? 'startPassportVerify' : null,
-      actionLabel: 'Verify Passport',
-      available: status.zkpassport_available,
-    },
-  ];
-
-  container.innerHTML = `
-    <div class="p-4 space-y-4">
-      ${pageHeader('Verify Identity', 'Unlock more features')}
-      <div class="card text-center mb-2">
-        <div class="text-4xl mb-2">${['🟤','🥈','🥇'][tier] || '🟤'}</div>
-        <div class="font-bold text-lg">${['Basic','Social','Premium'][tier] || 'Basic'}</div>
-        <div class="text-gray-400 text-sm">Current verification level</div>
+// ── Verify ─────────────────────────────────────────────────────────────────────
+async function renderVerify() {
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="page-header"><h2>Verify</h2></div>
+      <div style="padding:16px">
+        <div class="verify-tier">${skel(20,'60%','8px')}${skel(14,'80%','0')}</div>
+        <div class="verify-tier locked">${skel(20,'50%','8px')}${skel(14,'70%','0')}</div>
+        <div class="verify-tier locked">${skel(20,'40%','8px')}${skel(14,'60%','0')}</div>
       </div>
-      ${tiers.map(t => `
-        <div class="verify-tier ${t.current && tier === t.level ? 'border-purple-700' : ''}">
-          <div class="flex items-start justify-between mb-2">
-            <div class="flex items-center gap-2">
-              <span class="text-2xl">${t.icon}</span>
-              <div>
-                <div class="font-semibold">${escHtml(t.title)}</div>
-                ${t.current ? '<div class="text-green-400 text-xs">✓ Unlocked</div>' : ''}
-              </div>
-            </div>
-            ${t.action && !t.current ? `
-              <button onclick="window.${t.action}()" class="btn btn-primary text-xs" ${!t.available ? 'disabled' : ''}>
-                ${t.available ? escHtml(t.actionLabel) : 'Coming Soon'}
-              </button>` : ''}
+    </div>
+    ${bottomNav('verify')}`;
+
+  let tier = 0;
+  try { const d = await api('GET', '/verify/status'); tier = d.verification_tier || 0; } catch {}
+
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="page-header"><h2>Verify Identity</h2></div>
+      <div style="padding:16px">
+        <div class="verify-tier done">
+          <div class="verify-step">
+            <div class="verify-step-icon" style="background:#064e3b">✓</div>
+            <div><div style="font-weight:700">Tier 0 — Basic</div><div class="stat-label">Create an account · Free</div></div>
           </div>
-          <ul class="text-gray-400 text-sm space-y-1">
-            ${t.perks.map(p => `<li class="flex items-center gap-1.5"><span class="${t.current ? 'text-green-400' : 'text-gray-600'}">✓</span>${escHtml(p)}</li>`).join('')}
-          </ul>
-        </div>`).join('')}
-    </div>`;
-}
-
-window.startSocialVerify = async function() {
-  try {
-    const d = await api('POST', '/verify/social/start', {});
-    if (d.url) {
-      toast('Redirecting to Base Verify...', 'info');
-    } else if (d.coming_soon) {
-      toast('Base Verify coming soon!', 'info');
-    }
-  } catch (e) {
-    if (e.message.includes('coming soon') || e.message.includes('not configured')) toast('Coming soon!', 'info');
-    else toast(e.message, 'error');
-  }
-};
-
-window.startPassportVerify = async function() {
-  try {
-    const d = await api('POST', '/verify/passport/start', {});
-    if (d.url) toast('Redirecting to zkPassport...', 'info');
-    else if (d.coming_soon) toast('zkPassport coming soon!', 'info');
-  } catch (e) {
-    if (e.message.includes('coming soon') || e.message.includes('not configured') || e.message.includes('not installed')) toast('Coming soon!', 'info');
-    else toast(e.message, 'error');
-  }
-};
-
-// ── Profile ───────────────────────────────────────────────────────────────────
-async function renderProfile(container, username) {
-  container.innerHTML = `<div class="p-4">${skeletonCard(160)}${skeletonCard(60).repeat(3)}</div>`;
-
-  let user = null, posts = [];
-  try {
-    if (username) {
-      const d = await api('GET', `/user/profile/${username}`);
-      user = d.user;
-    } else {
-      const d = await api('GET', '/user/me');
-      user = d.user;
-    }
-  } catch (e) {
-    container.innerHTML = `<div class="p-4 text-center text-gray-400">User not found</div>`;
-    return;
-  }
-
-  try {
-    const d = await api('GET', '/posts');
-    posts = (d.posts || []).filter(p => p.user_id === user.user_id || p.username === user.username).slice(0, 10);
-  } catch {}
-
-  const isSelf = !username;
-
-  container.innerHTML = `
-    <div class="p-4 space-y-4">
-      <div class="card text-center">
-        <div class="w-16 h-16 rounded-full bg-purple-900 flex items-center justify-center text-2xl font-bold mx-auto mb-3">
-          ${escHtml((user.username || '?').slice(0,1).toUpperCase())}
+          <div class="stat-label">Access: Simulated trading, posting, prediction markets</div>
         </div>
-        <div class="font-bold text-xl mb-1">${escHtml(user.display_name || user.username)}</div>
-        <div class="text-gray-400 text-sm mb-2">@${escHtml(user.username)}</div>
-        <div class="flex justify-center mb-3">${tierBadge(user.verification_tier || 0)}</div>
-        ${user.bio ? `<div class="text-gray-300 text-sm mb-3">${escHtml(user.bio)}</div>` : ''}
-        <div class="flex justify-center gap-6 text-sm">
-          <div class="text-center"><div class="font-bold">${user.follower_count || 0}</div><div class="text-gray-400 text-xs">Followers</div></div>
-          <div class="text-center"><div class="font-bold">${user.following_count || 0}</div><div class="text-gray-400 text-xs">Following</div></div>
-          <div class="text-center"><div class="font-bold">${user.post_count || 0}</div><div class="text-gray-400 text-xs">Posts</div></div>
+
+        <div class="verify-tier ${tier>=1?'done':''}">
+          <div class="verify-step">
+            <div class="verify-step-icon" style="background:${tier>=1?'#064e3b':'var(--bg3)'}">${tier>=1?'✓':'1'}</div>
+            <div><div style="font-weight:700">Tier 1 — Social</div><div class="stat-label">Phone/email verification · Free</div></div>
+          </div>
+          <div class="stat-label" style="margin-bottom:10px">Access: Real futures trading, ICO participation (10× leverage)</div>
+          ${tier<1 ? `
+            <div style="margin-bottom:8px"><div class="input-label">Phone Number</div><input type="text" id="t1-phone" placeholder="+1234567890"></div>
+            <button class="btn btn-primary btn-sm" onclick="doTier1()">Verify Phone</button>
+          ` : '<div class="chip" style="color:var(--green);background:#064e3b">✓ Verified</div>'}
         </div>
-        ${isSelf ? `
-          <div class="mt-4 space-y-2">
-            <input type="text" id="prof-name" placeholder="Display name" value="${escHtml(user.display_name || '')}" class="w-full text-sm">
-            <textarea id="prof-bio" placeholder="Bio" rows="2" class="w-full text-sm">${escHtml(user.bio || '')}</textarea>
-            <button onclick="saveProfile()" class="btn btn-primary w-full text-sm">Save Profile</button>
-            <button onclick="navigate('/verify')" class="btn btn-outline w-full text-sm">Verify Account</button>
-          </div>` : `
-          <div class="mt-4">
-            <button onclick="followUser('${escHtml(user.username)}')" class="btn btn-primary w-full text-sm">Follow</button>
-          </div>`}
-      </div>
-      <div>
-        <h2 class="font-bold mb-2">Posts</h2>
-        ${renderPostCards(posts)}
-      </div>
-    </div>`;
-}
 
-window.saveProfile = async function() {
-  const display_name = document.getElementById('prof-name')?.value?.trim();
-  const bio = document.getElementById('prof-bio')?.value?.trim();
-  try {
-    await api('POST', '/user/profile', { display_name, bio });
-    toast('Profile updated!', 'success');
-  } catch (e) { toast(e.message, 'error'); }
-};
-
-window.followUser = async function(username) {
-  try {
-    await api('POST', '/follow', { username });
-    toast(`Following @${username}!`, 'success');
-  } catch (e) { toast(e.message, 'error'); }
-};
-
-// ── Token Detail ──────────────────────────────────────────────────────────────
-async function renderTokenDetail(container, symbol) {
-  container.innerHTML = `<div class="p-4">${skeletonCard(200)}</div>`;
-
-  let token = null;
-  try {
-    const d = await api('GET', `/tokens/${symbol}`);
-    token = d.token;
-  } catch (e) {
-    container.innerHTML = `<div class="p-4 text-center text-gray-400">Token not found</div>`;
-    return;
-  }
-
-  container.innerHTML = `
-    <div class="p-4 space-y-4">
-      <div class="flex items-center gap-2">
-        <button onclick="navigate('/trade')" class="text-gray-400 text-lg">←</button>
-        <div class="w-10 h-10 rounded-full bg-purple-900 flex items-center justify-center font-bold">${escHtml(token.symbol.slice(0,2))}</div>
-        <div>
-          <div class="font-bold text-lg">${escHtml(token.symbol)}</div>
-          <div class="text-gray-400 text-sm">${escHtml(token.name || '')}</div>
+        <div class="verify-tier ${tier>=2?'done':''} ${tier<1?'locked':''}">
+          <div class="verify-step">
+            <div class="verify-step-icon" style="background:${tier>=2?'#064e3b':'var(--bg3)'}">${tier>=2?'✓':'2'}</div>
+            <div><div style="font-weight:700">Tier 2 — zkPassport</div><div class="stat-label">Zero-knowledge passport proof · Free</div></div>
+          </div>
+          <div class="stat-label" style="margin-bottom:10px">Access: LP pool creation, 50× leverage, advanced features</div>
+          ${tier>=2 ? '<div class="chip" style="color:var(--green);background:#064e3b">✓ Verified</div>'
+            : tier>=1 ? '<button class="btn btn-primary btn-sm" onclick="doTier2()">Start zkPassport</button>'
+            : '<div class="stat-label">Complete Tier 1 first</div>'}
         </div>
       </div>
-      <div class="card">
-        <div class="text-3xl font-bold mb-1">$${fmtNum(token.price_usd)}</div>
-        <div>${fmtPct(token.change_24h)} (24h)</div>
-      </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div class="card"><div class="text-gray-400 text-xs">Market Cap</div><div class="font-semibold">$${fmtNum(token.market_cap)}</div></div>
-        <div class="card"><div class="text-gray-400 text-xs">24h Volume</div><div class="font-semibold">$${fmtNum(token.volume_24h)}</div></div>
-        <div class="card"><div class="text-gray-400 text-xs">24h High</div><div class="font-semibold text-green-400">$${fmtNum(token.high_24h)}</div></div>
-        <div class="card"><div class="text-gray-400 text-xs">24h Low</div><div class="font-semibold text-red-400">$${fmtNum(token.low_24h)}</div></div>
-      </div>
-      <button onclick="navigate('/trade')" class="btn btn-primary w-full">Trade ${escHtml(token.symbol)}</button>
-    </div>`;
+    </div>
+    ${bottomNav('verify')}`;
+
+  window.doTier1 = async () => {
+    const phone = document.getElementById('t1-phone')?.value;
+    if (!phone) return toast('Enter phone number','error');
+    try { await api('POST','/verify/tier1',{method:'phone',value:phone}); toast('Submitted!','success'); renderVerify(); }
+    catch(e) { toast(e.message,'error'); }
+  };
+  window.doTier2 = async () => {
+    try {
+      const d = await api('POST','/verify/tier2/init',{});
+      if (d.redirect_url) window.location = d.redirect_url;
+      else toast('ZK verification initiated','info');
+    } catch(e) { toast(e.message,'error'); }
+  };
 }
 
-// ── NFTs ──────────────────────────────────────────────────────────────────────
-async function renderNFTs(container) {
-  container.innerHTML = `<div class="p-4">${skeletonCard(160).repeat(4)}</div>`;
+// ── Profile ────────────────────────────────────────────────────────────────────
+async function renderProfile(username) {
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="page-header"><button class="btn btn-sm btn-secondary" onclick="history.back()">← Back</button><h2>Profile</h2></div>
+      ${skel(200,'100%','0')}
+    </div>
+    ${bottomNav('')}`;
+
+  try {
+    const path = username ? `/user/profile/${username}` : '/user/me';
+    const d = await api('GET', path);
+    const u = d.user || d;
+    APP.innerHTML = `
+      <div class="page-content">
+        <div class="page-header"><button class="btn btn-sm btn-secondary" onclick="history.back()">← Back</button><h2>${esc(u.username)}</h2></div>
+        <div style="padding:20px;text-align:center;border-bottom:1px solid var(--border)">
+          <div class="post-avatar" style="width:64px;height:64px;font-size:24px;margin:0 auto 12px">${esc((u.username||'?')[0].toUpperCase())}</div>
+          <div style="font-size:18px;font-weight:700">${esc(u.display_name||u.username)}</div>
+          <div class="stat-label">@${esc(u.username)}</div>
+          <div style="margin-top:8px">${tierBadge(u.verification_tier||0,u.is_admin)}</div>
+          ${u.bio ? `<div style="margin-top:8px;font-size:13px;color:var(--text-muted)">${esc(u.bio)}</div>` : ''}
+          <div style="display:flex;justify-content:center;gap:24px;margin-top:16px">
+            <div><div style="font-weight:700">${u.post_count||0}</div><div class="stat-label">Posts</div></div>
+            <div><div style="font-weight:700">${u.follower_count||0}</div><div class="stat-label">Followers</div></div>
+            <div><div style="font-weight:700">${u.following_count||0}</div><div class="stat-label">Following</div></div>
+          </div>
+        </div>
+      </div>
+      ${bottomNav('')}`;
+  } catch(e) {
+    APP.innerHTML = `<div class="page-content"><div class="empty-state">${esc(e.message)}</div></div>${bottomNav('')}`;
+  }
+}
+
+// ── NFTs ───────────────────────────────────────────────────────────────────────
+async function renderNFTs() {
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="page-header"><button class="btn btn-sm btn-secondary" onclick="navigate('/home')">← Back</button><h2>NFTs</h2><button class="btn btn-sm btn-primary" onclick="doMint()">Mint</button></div>
+      <div style="padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        ${Array.from({length:4},()=>`<div class="nft-card"><div class="nft-image">${skel(80,'100%','0')}</div><div class="nft-info">${skel(14,'70%','4px')}${skel(12,'40%','0')}</div></div>`).join('')}
+      </div>
+    </div>
+    ${bottomNav('')}`;
 
   let nfts = [];
-  try {
-    const d = await api('GET', '/nfts');
-    nfts = d.nfts || [];
-  } catch (e) {
-    container.innerHTML = `<div class="p-4 text-center text-gray-400">Failed to load NFTs</div>`;
-    return;
-  }
+  try { const d = await api('GET', '/nfts'); nfts = d.nfts || []; } catch {}
 
-  container.innerHTML = `
-    <div class="p-4">
-      ${pageHeader('NFTs', 'Mint & collect', `<button onclick="showMintNFT()" class="btn btn-primary text-sm">Mint</button>`)}
-      <div id="mint-form" class="hidden card mb-4">
-        <h3 class="font-bold mb-3">Mint NFT</h3>
-        <div class="space-y-2">
-          <input type="text" id="nft-name" placeholder="NFT Name" class="w-full">
-          <textarea id="nft-desc" placeholder="Description" rows="2" class="w-full"></textarea>
-          <input type="number" id="nft-price" placeholder="List price (USD)" min="0" class="w-full">
-          <button onclick="mintNFT()" class="btn btn-primary w-full">Mint</button>
-        </div>
-      </div>
-      <div class="grid grid-cols-2 gap-3">
-        ${nfts.map(n => `
+  APP.innerHTML = `
+    <div class="page-content">
+      <div class="page-header"><button class="btn btn-sm btn-secondary" onclick="navigate('/home')">← Back</button><h2>NFTs</h2><button class="btn btn-sm btn-primary" onclick="doMint()">Mint</button></div>
+      <div style="padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        ${nfts.length ? nfts.map(n => `
           <div class="nft-card">
-            <div class="bg-gradient-to-br from-purple-900 to-blue-900 h-28 flex items-center justify-center text-4xl">
-              🎨
+            <div class="nft-image">${esc(n.metadata?.emoji||'🎨')}</div>
+            <div class="nft-info">
+              <div style="font-weight:600;font-size:13px">${esc(n.name||'NFT')}</div>
+              <div class="stat-label">#${n.token_id}</div>
+              ${n.is_listed ? `<div style="margin-top:4px"><span style="font-weight:600;font-size:12px">$${fmt(n.list_price)}</span> <button class="btn btn-primary btn-sm" onclick="buyNFT('${n.id}')">Buy</button></div>` : ''}
             </div>
-            <div class="p-3">
-              <div class="font-semibold text-sm truncate">${escHtml(n.name)}</div>
-              <div class="text-gray-400 text-xs mb-2">by ${escHtml(n.owner_username || 'unknown')}</div>
-              <div class="flex items-center justify-between">
-                <div class="text-xs text-purple-400">$${fmtNum(n.price || 0)}</div>
-                <button onclick="buyNFT(${n.id})" class="text-xs btn btn-primary py-1 px-2">Buy</button>
-              </div>
-            </div>
-          </div>`).join('')}
-        ${nfts.length === 0 ? '<div class="col-span-2 text-center text-gray-400 py-8">No NFTs yet</div>' : ''}
+          </div>`).join('') : '<div class="empty-state" style="grid-column:1/-1">No NFTs found</div>'}
       </div>
-    </div>`;
+    </div>
+    ${bottomNav('')}`;
+
+  window.doMint = async () => {
+    const name = prompt('NFT name:');
+    if (!name) return;
+    try { await api('POST','/nfts/mint',{name,metadata:{emoji:'🎨'}}); toast('Minted!','success'); renderNFTs(); }
+    catch(e) { toast(e.message,'error'); }
+  };
+  window.buyNFT = async (id) => {
+    try { await api('POST','/nfts/buy',{nft_id:id}); toast('Purchased!','success'); renderNFTs(); }
+    catch(e) { toast(e.message,'error'); }
+  };
 }
 
-window.showMintNFT = () => document.getElementById('mint-form')?.classList.remove('hidden');
-window.mintNFT = async function() {
-  const name = document.getElementById('nft-name')?.value?.trim();
-  const description = document.getElementById('nft-desc')?.value?.trim();
-  const price = parseFloat(document.getElementById('nft-price')?.value) || 0;
-  if (!name) return toast('Enter a name', 'error');
-  try {
-    await api('POST', '/nfts/mint', { name, description, price });
-    toast('NFT minted!', 'success');
-    renderNFTs(document.querySelector('.page-content'));
-  } catch (e) { toast(e.message, 'error'); }
-};
-window.buyNFT = async function(nftId) {
-  if (!confirm('Buy this NFT?')) return;
-  try {
-    await api('POST', '/nfts/buy', { nft_id: nftId });
-    toast('NFT purchased!', 'success');
-    renderNFTs(document.querySelector('.page-content'));
-  } catch (e) { toast(e.message, 'error'); }
-};
+// ── Router ─────────────────────────────────────────────────────────────────────
+function render() {
+  const parts = window.location.pathname.replace(/^\//, '').split('/');
+  const page = parts[0] || 'home';
+  const sub  = parts[1] || '';
 
-// ── Init ──────────────────────────────────────────────────────────────────────
-window.navigate = navigate;
+  if      (page === 'futures' && sub)   renderFuturesChart(sub.toUpperCase());
+  else if (page === 'futures-portfolio') renderFuturesPortfolio();
+  else if (page === 'home' || page === '') renderHome();
+  else if (page === 'trade')            renderTrade();
+  else if (page === 'futures')          renderFutures();
+  else if (page === 'earn')             renderEarn();
+  else if (page === 'markets')          renderMarkets();
+  else if (page === 'explore')          renderExplore();
+  else if (page === 'verify')           renderVerify();
+  else if (page === 'profile')          renderProfile(sub);
+  else if (page === 'nfts')             renderNFTs();
+  else                                  renderHome();
+}
 
-const initPath = window.location.pathname;
-render(initPath && initPath !== '/' ? initPath : '/home');
+window.addEventListener('popstate', render);
+render();

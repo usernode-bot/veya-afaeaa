@@ -1,41 +1,48 @@
-const INTERVAL_MS = 8 * 60 * 60 * 1000; // 8 hours
+'use strict';
+const INTERVAL_MS = 8 * 60 * 60 * 1000;
 
 function start(pool) {
-  const run = async () => {
+  async function run() {
     try {
-      const { rows: markets } = await pool.query('SELECT * FROM futures_markets WHERE is_active=TRUE');
-      for (const market of markets) {
-        const fundingRate = parseFloat(market.funding_rate || 0);
-        if (fundingRate === 0) continue;
-        const { rows: positions } = await pool.query(
-          `SELECT * FROM futures_positions WHERE market_symbol=$1 AND status='open' AND is_paper_trade=FALSE`,
-          [market.symbol]
-        );
-        for (const pos of positions) {
-          const notional = pos.size * parseFloat(market.mark_price);
-          let payment = notional * Math.abs(fundingRate);
-          // Long pays short when funding is positive; short pays long when negative
-          if ((pos.side === 'long' && fundingRate > 0) || (pos.side === 'short' && fundingRate < 0)) {
-            payment = -payment; // user pays
+      const { rows: positions } = await pool.query(
+        `SELECT fp.*, fm.funding_rate, fm.mark_price AS current_mark
+         FROM futures_positions fp
+         JOIN futures_markets fm ON fm.symbol=fp.symbol
+         WHERE fp.status='open'`
+      );
+
+      for (const pos of positions) {
+        try {
+          const rate = parseFloat(pos.funding_rate);
+          if (rate === 0) continue;
+          const mark = parseFloat(pos.current_mark);
+          const size = parseFloat(pos.size);
+          const notional = size * mark;
+          let payment = notional * Math.abs(rate);
+
+          // Long pays when rate > 0; short pays when rate < 0
+          if ((pos.direction === 'long' && rate > 0) || (pos.direction === 'short' && rate < 0)) {
+            payment = -payment;
           }
-          if (payment !== 0) {
+
+          await pool.query(
+            `INSERT INTO futures_funding_payments (position_id, user_id, symbol, rate, payment) VALUES ($1,$2,$3,$4,$5)`,
+            [pos.id, pos.user_id, pos.symbol, rate, payment.toFixed(8)]
+          );
+
+          if (pos.mode === 'live' && payment !== 0) {
             await pool.query(
               `UPDATE user_profiles SET veya_balance=veya_balance+$1 WHERE user_id=$2`,
-              [payment, pos.user_id]
+              [payment.toFixed(8), pos.user_id]
             );
           }
-        }
+        } catch {}
       }
-      console.log('[funding] Funding payments applied');
-    } catch (err) {
-      console.error('[funding] Error:', err.message);
-    }
-  };
-  // Run once at startup after a delay, then every 8h
-  setTimeout(() => {
-    run();
-    setInterval(run, INTERVAL_MS);
-  }, 5000);
+    } catch {}
+  }
+
+  setInterval(run, INTERVAL_MS);
+  setTimeout(run, 30000);
 }
 
 module.exports = { start };

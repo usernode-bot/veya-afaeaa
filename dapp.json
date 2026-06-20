@@ -24,7 +24,7 @@
     { "name": "Futures trading view loads", "path": "/futures/BTC-PERP", "expectSelector": ".futures-chart" },
     { "name": "Futures portfolio loads", "path": "/futures-portfolio", "expectSelector": ".futures-portfolio" },
     { "name": "Earn loads", "path": "/earn", "expectSelector": ".earn-section" },
-    { "name": "Markets load", "path": "/markets", "expectSelector": ".market-card" },
+    { "name": "Predict markets load", "path": "/markets", "expectSelector": ".market-card" },
     { "name": "Explore loads", "path": "/explore", "expectSelector": ".post-card" },
     { "name": "Verify page loads", "path": "/verify", "expectSelector": ".verify-tier" },
     { "name": "Admin loads", "path": "/admin", "expectSelector": ".admin-metrics" }

@@ -1,73 +1,50 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <script>
-  // usernode-dev-console@1
-  (function () {
-    if (window.__usernodeDevConsole) return;
-    window.__usernodeDevConsole = true;
-    var S = '__usernodeDevConsole';
-    function serialize(v, depth) {
-      depth = depth || 0;
-      try {
-        if (v === undefined) return 'undefined';
-        if (v === null) return 'null';
-        if (typeof v === 'string') return v;
-        if (typeof v === 'number' || typeof v === 'boolean') return String(v);
-        if (typeof v === 'function') return '[Function ' + (v.name || 'anonymous') + ']';
-        if (v instanceof Error) return (v.stack || (v.name + ': ' + v.message));
-        if (depth > 3) return '[…]';
-        var seen = new WeakSet();
-        return JSON.stringify(v, function (k, val) {
-          if (typeof val === 'object' && val !== null) {
-            if (seen.has(val)) return '[Circular]';
-            seen.add(val);
-          }
-          if (typeof val === 'function') return '[Function ' + (val.name || 'anonymous') + ']';
-          if (val instanceof Error) return val.stack || (val.name + ': ' + val.message);
-          return val;
-        });
-      } catch (e) { try { return String(v); } catch (_) { return '[unserializable]'; } }
-    }
-    function post(level, args, meta) {
-      try {
-        var payload = {
-          sentinel: S, level: level,
-          args: Array.prototype.slice.call(args).map(function (a) { return serialize(a); }),
-          ts: Date.now(), url: location.href,
-        };
-        if (meta) for (var k in meta) payload[k] = meta[k];
-        if (window.parent && window.parent !== window) window.parent.postMessage(payload, '*');
-      } catch (_) {}
-    }
-    ['log','info','warn','error','debug'].forEach(function (level) {
-      var orig = console[level] ? console[level].bind(console) : function () {};
-      console[level] = function () { post(level, arguments); orig.apply(null, arguments); };
-    });
-    window.addEventListener('error', function (e) {
-      var msg = (e.error && (e.error.stack || e.error.message)) || e.message || 'Error';
-      post('error', [msg], { source: e.filename || '', line: e.lineno || 0, col: e.colno || 0, kind: 'error' });
-    });
-    window.addEventListener('unhandledrejection', function (e) {
-      var r = e.reason;
-      var msg = (r && (r.stack || r.message)) || String(r);
-      post('error', [msg], { kind: 'unhandledrejection' });
-    });
-    try { post('info', ['[dev-console ready]'], { kind: 'ready' }); } catch (_) {}
-  })();
-  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Veya</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config = { darkMode: 'class' }</script>
   <link rel="stylesheet" href="/styles.css">
-</head>
-<body class="bg-gray-950 text-white overscroll-none">
-  <div id="root" class="min-h-screen flex flex-col"></div>
   <script>
-    window.__TOKEN__ = new URLSearchParams(window.location.search).get('token') || '';
+    // usernode-dev-console@1
+    (function() {
+      var levels = ['log','info','warn','error'];
+      levels.forEach(function(level) {
+        var orig = console[level].bind(console);
+        console[level] = function() {
+          orig.apply(console, arguments);
+          try {
+            window.parent.postMessage({ type: 'console', level: level, args: Array.from(arguments).map(function(a){ try { return JSON.stringify(a); } catch(e) { return String(a); } }) }, '*');
+          } catch(e) {}
+        };
+      });
+      window.addEventListener('error', function(e) {
+        try { window.parent.postMessage({ type: 'console', level: 'error', args: [e.message + ' (' + e.filename + ':' + e.lineno + ')'] }, '*'); } catch(ex) {}
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        try { window.parent.postMessage({ type: 'console', level: 'error', args: ['Unhandled promise rejection: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason))] }, '*'); } catch(ex) {}
+      });
+    })();
   </script>
+  <script>
+    // Extract JWT token from URL params and store in sessionStorage
+    (function() {
+      var params = new URLSearchParams(window.location.search);
+      var token = params.get('token');
+      if (token) {
+        sessionStorage.setItem('usernode_token', token);
+        // Remove token from URL without reload
+        var url = new URL(window.location.href);
+        url.searchParams.delete('token');
+        history.replaceState({}, '', url.toString());
+      }
+      window.__TOKEN__ = sessionStorage.getItem('usernode_token') || '';
+    })();
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="toast-container"></div>
   <script src="https://social-vibecoding.usernodelabs.org/usernode-bridge/v1/bridge.js"></script>
   <script src="/app.js"></script>
 </body>
