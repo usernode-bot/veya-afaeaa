@@ -92,6 +92,16 @@ async function start() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+
+  // Truncate all user-created tables on every boot (both staging and production).
+  const { rows: tables } = await pool.query(`
+    SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+  `);
+  if (tables.length > 0) {
+    const tableList = tables.map(r => `"${r.tablename}"`).join(', ');
+    await pool.query(`TRUNCATE ${tableList} CASCADE`);
+  }
+
   app.listen(port, () => console.log(`Listening on :${port}`));
 }
 
